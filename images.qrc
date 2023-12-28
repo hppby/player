@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/">
+        <file>resource/arrow-left.png</file>
+        <file>resource/arrow-right.png</file>
+        <file>resource/player-pause.png</file>
+        <file>resource/player-play.png</file>
+        <file>resource/fullscreen-shrink.png</file>
+        <file>resource/fullscreen-expand.png</file>
+
+
+    </qresource>
+</RCC>
