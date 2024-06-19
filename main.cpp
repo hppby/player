@@ -1,5 +1,6 @@
+
+
 #include "mainwindow.h"
-#include "src/videoplayer/videoplayer.h"
 #include "src/home/home.h"
 
 #include <QApplication>

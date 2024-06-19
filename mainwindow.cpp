@@ -16,7 +16,7 @@ MainWindow::MainWindow(QWidget *parent)
     QLabel *label = new QLabel(this);
     label->setFixedSize(300, 200);
     label->setFrameRect(QRect(100, 100, 400, 100));
-    label->setText("大宝专属播放器！！！");
+//    label->setText("大宝专属播放器！！！");
     label->setFont(QFont(":serif", 20, 500));
     label->setAlignment(Qt::AlignCenter);
 
@@ -73,14 +73,14 @@ void MainWindow::openFile() {
         videoplayer->show();
         }
 
-        videoplayer->openFile(fileNames.first());
+
 
         fileDialog->setAttribute(Qt::WA_DeleteOnClose, true);
         fileDialog->destroyed();
         fileDialog=NULL;
         qDebug() << "fileDialog" << fileDialog ;
 
-
+        videoplayer->openFile(fileNames.first());
 
     }
 

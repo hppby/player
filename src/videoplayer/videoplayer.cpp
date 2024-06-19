@@ -4,6 +4,8 @@
 
 // You may need to build the project (run Qt uic code generator) to get "ui_Videoplayer.h" resolved
 
+
+
 #include <QVBoxLayout>
 #include <QIcon>
 #include <QDebug>
@@ -14,13 +16,18 @@
 #include <QBoxLayout>
 #include <QLabel>
 #include <QTimeZone>
-#include "videoplayer.h"
 
-//#include <>
+
+#include <QMediaPlayer>
+#include <QVideoWidget>
+#include <QAudioOutput>
+
+#include "videoplayer.h"
 
 
 Videoplayer::Videoplayer(QWidget *parent) : QWidget(parent), m_voice(50),
                                             currentFormattedTime("00:00") {
+
     this->setGeometry(100, 100, 1024, 600);
     this->setAttribute(Qt::WA_DeleteOnClose, true);
     this->setMouseTracking(true);
@@ -29,80 +36,100 @@ Videoplayer::Videoplayer(QWidget *parent) : QWidget(parent), m_voice(50),
     m_headerHeight = 30;
     m_controlHeight = 80;
     m_timer = new QTimer(this);
-    hlayout = new QVBoxLayout(this);
-    hlayout->setContentsMargins(0, 0, 0, 0);
+    m_progresss_timer = new QTimer(this);
 
-
-    InitHeader();
     // 初始化播放器
     InitPlayer();
 
+    InitHeader();
+
     InitControl();
 
-    connect(m_timer,&QTimer::timeout,this,[=](){
+    connect(m_timer, &QTimer::timeout, this, [=]() {
         qDebug() << "timeout=====";
         headerContent->setFixedHeight(0);
         controlBox->setFixedHeight(0);
-        m_isControlShowing=false;
+        m_isControlShowing = false;
         m_timer->stop();
+    });
+
+    connect(m_progresss_timer, &QTimer::timeout, this, [=]() {
+        qDebug() << "---m_progresss_timer=====";
+
+        int currentTime = (int) this->m_videoWidget->m_currentTime;
+        if (currentTime > 3600) {
+            int hour = currentTime / 3600;
+            int minute = (currentTime - hour * 3600) / 60;
+            int second = currentTime - hour * 3600 - minute * 60;
+            this->m_currentTimeLabel ->setText(QString("%1:%2:%3").arg(hour).arg(minute).arg(second));
+        } else if (currentTime > 60) {
+            int minute = currentTime / 60;
+            int second = currentTime - minute * 60;
+            this->m_currentTimeLabel ->setText(QString("%1:%2").arg(minute).arg(second));
+        } else {
+            this->m_currentTimeLabel ->setText(QString("%1").arg(currentTime));
+        }
+        
+        qDebug() << "===currentTime===" << currentTime;
+
+        int lastTime =(int) this->m_videoWidget->m_duration - currentTime;
+        
+        qDebug() << "===lastTime===" << lastTime;
+
+        if (lastTime > 3600) {
+         int hour = lastTime / 3600;
+         int minute = (lastTime - hour * 3600) / 60;
+         int second = lastTime - hour * 3600 - minute * 60;
+         m_lastTimeLabel ->setText(QString("%1:%2:%3").arg(hour).arg(minute).arg(second));
+        } else if (lastTime > 60) {
+            int minute = lastTime / 60;
+            int second = lastTime - minute * 60;
+            m_lastTimeLabel ->setText(QString("%1:%2").arg(minute).arg(second));
+        } else {
+            m_lastTimeLabel ->setText(QString("%1").arg(lastTime));
+        }
+
     });
 
 }
 
 void Videoplayer::InitHeader() {
     headerContent = new QWidget(this);
-
+    headerContent->setGeometry(0,0, this->width(), m_headerHeight);
     headerContent->setStyleSheet("background-color: rgb(242,156,177)");
-    headerContent->setFixedHeight(m_headerHeight);
-    hlayout->addWidget(headerContent);
-    hlayout->addSpacing(0);
+
     m_titleLabel = new QLabel(headerContent);
     QHBoxLayout *titleOlayout = new QHBoxLayout(headerContent);
     titleOlayout->setContentsMargins(0, 0, 0, 0);
     titleOlayout->addWidget(m_titleLabel);
-    m_titleLabel->setText("正在为大宝播放：《》");
+//    m_titleLabel->setText("正在为大宝播放：《》");
     m_titleLabel->setAlignment(Qt::AlignCenter);
-
 }
+
 
 void Videoplayer::InitPlayer() {
     audiooutput = new QAudioOutput();
-    player = new QMediaPlayer;
-    player->setPlaybackRate(1.0);//默认1倍速播放
+    m_playView = new QLabel(this);
+    m_playView->setGeometry(0, 0, this->width(), this->height());
+    m_playView->setStyleSheet("background-color: '#FF0000'");
+    m_playView->setPixmap(QPixmap(":/resource/player-play.png"));
 
-    QWidget *playerContent = new QWidget(this);
-
-    QVBoxLayout *playerContentLayout = new QVBoxLayout(playerContent);
-
-    videoWidget = new QVideoWidget(playerContent);
-    QPushButton *playerContentBtn = new QPushButton(videoWidget);
-    playerContentBtn->setFixedSize(111,555);
-    hlayout->addWidget(videoWidget);
-    hlayout->setStretch(1, 9);
-
-    videoWidget->setAspectRatioMode(Qt::KeepAspectRatioByExpanding);//缩放适应videoWidget的大小
-    player->setVideoOutput(videoWidget);//设置播放窗口
-    player->setAudioOutput(audiooutput);//设置声音
-    audiooutput->setVolume(m_voice);//初始音量为50
-
-    connect(playerContentBtn, &QPushButton::clicked, [=]() {
-
-        qDebug() << "QPushButton::pressed";
-        showControlBox();
-    });
+    m_videoWidget = new VideoWidget(this, m_playView);
 
 }
+
+void Videoplayer::videoImagehandler(QImage *image) {
+
+}
+
 
 void Videoplayer::InitControl() {
 
     controlBox = new QWidget(this);
-    controlBox->setFixedHeight(m_controlHeight);
-    hlayout->addWidget(controlBox);
+    controlBox->setGeometry(0, this->height() - m_controlHeight, this->width(), m_controlHeight);
 
     QVBoxLayout *controlLayout = new QVBoxLayout(controlBox);
-
     controlBox->setStyleSheet("background-color: rgb(242,156,177)");
-
     QWidget *progressBox = new QWidget(controlBox);
     controlLayout->addWidget(progressBox, 1);
 
@@ -137,7 +164,7 @@ void Videoplayer::InitControl() {
     // 声音控制滑块
     m_voiceslider = new QSlider(Qt::Horizontal);
     m_voiceslider->setRange(0, 100);
-    m_voiceslider->setValue(50);
+    m_voiceslider->setValue(100);
 
     /**
      * 播放暂停按钮
@@ -186,19 +213,18 @@ void Videoplayer::InitControl() {
     // 设置音量
     connect(m_voiceslider, &QSlider::valueChanged, [=](int voice) {
         m_voice = voice;
-        audiooutput->setVolume((float) voice/(float) (m_voiceslider->width()));
+        m_videoWidget->changeVolume(m_voice);
         showControlBox();
     });
 
     // 设置暂停播放
     connect(m_playbutton, &QPushButton::clicked, [=]() {
-        if (player->isPlaying()) {
-            player->pause();
-            ButtonStyleSet(m_playbutton, ":/resource/player-pause.png");
-        } else {
-            player->play();
-            ButtonStyleSet(m_playbutton, ":/resource/player-play.png");
-        }
+       bool isPlaying = m_videoWidget->startOrPause();
+       if (isPlaying) {
+           m_progresss_timer->start(1000);
+       } else {
+           m_progresss_timer->stop();
+       }
     });
 
     // 设置播放进度
@@ -208,7 +234,8 @@ void Videoplayer::InitControl() {
 
         QString currentTime = QDateTime::fromMSecsSinceEpoch(progress, QTimeZone::utc()).toString("HH:mm:ss");
         m_currentTimeLabel->setText(currentTime);
-        QString lastTime = QDateTime::fromMSecsSinceEpoch((player->duration() - progress), QTimeZone::utc()).toString("HH:mm:ss");
+        QString lastTime = QDateTime::fromMSecsSinceEpoch((player->duration() - progress), QTimeZone::utc()).toString(
+                "HH:mm:ss");
         m_lastTimeLabel->setText(lastTime);
     });
 
@@ -216,7 +243,7 @@ void Videoplayer::InitControl() {
     connect(m_Progressslider, &QSlider::sliderPressed, [=]() {
         isProgressMoving = true;
         m_timer->stop();
-        m_isControlShowing= true;
+        m_isControlShowing = true;
     });
 
     // 设置播放进度
@@ -264,13 +291,14 @@ void Videoplayer::InitControl() {
 
     // 播放监听
     connect(player, &QMediaPlayer::positionChanged, [=](int position) {
-        if (!isProgressMoving  && player && m_Progressslider) {
+        if (!isProgressMoving && player && m_Progressslider) {
             double progress = (double) position / (double) player->duration() * (double) (this->width());
             m_Progressslider->setValue(progress);
             QString currentTime = QDateTime::fromMSecsSinceEpoch(position, QTimeZone::utc()).toString("HH:mm:ss");
             m_currentTimeLabel->setText(currentTime);
 
-            QString lastTime = QDateTime::fromMSecsSinceEpoch((player->duration() - position), QTimeZone::utc()).toString("HH:mm:ss");
+            QString lastTime = QDateTime::fromMSecsSinceEpoch((player->duration() - position),
+                                                              QTimeZone::utc()).toString("HH:mm:ss");
             m_lastTimeLabel->setText(lastTime);
         }
     });
@@ -281,6 +309,7 @@ void Videoplayer::InitControl() {
     });
 
 }
+
 void Videoplayer::showControlBox() {
     if (m_isControlShowing) {
 
@@ -309,20 +338,38 @@ void Videoplayer::ButtonStyleSet(QPushButton *button, QString IconPath) {
 }
 
 void Videoplayer::openFile(QString filename) {
-    player->setSource(QUrl::fromLocalFile(filename));
-    player->play();
-    showControlBox();
-    m_titleLabel->setText(QString("正在为大宝播放：《%1》").arg(filename));
+
+    bool isOpen = m_videoWidget->openFile(filename);
+    if (isOpen) {
+        double time = m_videoWidget->m_duration;
+        m_progresss_timer->start(1000);
+        qDebug() << "===time===" << time;
+    }
+
+
 }
 
-void Videoplayer::mouseMoveEvent(QMouseEvent *ev){
-
-    qDebug() << "mouseMoveEvent";
+void Videoplayer::mouseMoveEvent(QMouseEvent *ev) {
     showControlBox();
 }
+
+
+void Videoplayer::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event); // 调用基类实现
+    // 在这里添加你的代码，比如重新布局内部控件
+    qDebug() << "窗口大小已更改: " << event->size();
+    this->m_playView->resize(event->size().width(), event->size().height());
+    this->headerContent->setGeometry(0, 0, this->width(), m_headerHeight);
+    this->controlBox->setGeometry(0, this->height() - m_controlHeight, this->width(), m_controlHeight);
+
+}
+
 
 
 Videoplayer::~Videoplayer() {
 
 
 }
+
+
