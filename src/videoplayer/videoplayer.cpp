@@ -62,12 +62,11 @@ Videoplayer::Videoplayer(QWidget *parent) : QWidget(parent), m_voice(50),
     });
 
     connect(m_timelabel_timer, &QTimer::timeout, this, [=]() {
-        int currentTime = (int) this->m_videoWidget->getCurrentTime();
+        int currentTime = (int) this->m_videoDecoder->getCurrentTime();
         this->m_currentTimeLabel ->setText(this->secondsToHms(currentTime));
-        int totalTime = (int) this->m_videoWidget->getDuration();
+        int totalTime = (int) this->m_videoDecoder->getDuration();
         int lastTime =totalTime - currentTime;
         m_lastTimeLabel ->setText(this->secondsToHms(lastTime));
-        qDebug() << "===currentTime===" << currentTime;
 
     });
 
@@ -110,7 +109,7 @@ void Videoplayer::InitPlayer() {
     m_playView->setStyleSheet("background-color: '#FF0000'");
     m_playView->setPixmap(QPixmap(":/resource/player-play.png"));
     m_playView->setScaledContents(true);
-    m_videoWidget = new VideoWidget(this, m_playView);
+    m_videoDecoder = new VideoDecoder(this, m_playView);
 
 }
 
@@ -194,19 +193,19 @@ void Videoplayer::InitControl() {
 
     // 设置静音按钮
     connect(m_voicebutton, &QPushButton::clicked, [=]() {
-        this->m_videoWidget->onSoundOff();
+        this->m_videoDecoder->onSoundOff();
     });
 
     // 设置音量
     connect(m_voiceslider, &QSlider::valueChanged, [=](int voice) {
         m_voice = voice;
-        m_videoWidget->changeVolume(m_voice);
+        m_videoDecoder->changeVolume(m_voice);
         showControlBox();
     });
 
     // 设置暂停播放
     connect(m_playbutton, &QPushButton::clicked, [=]() {
-       bool isPlaying = m_videoWidget->startOrPause();
+       bool isPlaying = m_videoDecoder->startOrPause();
        if (isPlaying) {
            m_progresss_timer->start();
            m_timelabel_timer->start();
@@ -320,7 +319,7 @@ void Videoplayer::ButtonStyleSet(QPushButton *button, QString IconPath) {
 
 void Videoplayer::openFile(QString filename) {
 
-    bool isOpen = m_videoWidget->openFile(filename);
+    bool isOpen = m_videoDecoder->openFile(filename);
     if (isOpen) {
         m_progresss_timer->start();
         m_timelabel_timer->start();
@@ -338,7 +337,7 @@ void Videoplayer::resizeEvent(QResizeEvent *event)
     // 在这里添加你的代码，比如重新布局内部控件
     qDebug() << "窗口大小已更改: " << event->size();
 
-    this->m_videoWidget->videoSize = this->size();
+    this->m_videoDecoder->videoSize = this->size();
 
     this->m_playView->resize(event->size().width(), event->size().height());
     this->headerContent->setGeometry(0, 0, this->width(), m_headerHeight);
@@ -359,8 +358,8 @@ void Videoplayer::progresssValueChanged() {
 
     if (isProgressMoving) return;
 
-     double totalTime = this->m_videoWidget->getDuration();
-    double currentTime = this->m_videoWidget->getCurrentTime();
+     double totalTime = this->m_videoDecoder->getDuration();
+    double currentTime = this->m_videoDecoder->getCurrentTime();
 
     int fullWidth = this->m_Progressslider->width();
     this->m_Progressslider->setRange(0, fullWidth);
@@ -373,13 +372,13 @@ void Videoplayer::progresssValueChanged() {
 void Videoplayer::handleProgressChanged(int addProgress) {
     int fullWidth = this->m_Progressslider->width();
     int progress = (int) this->m_progress;
-    double totalTime = this->m_videoWidget->getDuration();
+    double totalTime = this->m_videoDecoder->getDuration();
     if (progress > 0) {
         int64_t currentTime =(int64_t) totalTime * progress / fullWidth;
         if (currentTime + addProgress > 0) {
-        this->m_videoWidget->changePlaybackProgress(currentTime);
+        this->m_videoDecoder->changePlaybackProgress(currentTime + addProgress);
         } else {
-            this->m_videoWidget->changePlaybackProgress(0);
+            this->m_videoDecoder->changePlaybackProgress(0);
         }
     }
 }

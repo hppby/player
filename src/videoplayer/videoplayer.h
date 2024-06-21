@@ -42,7 +42,7 @@ extern "C" {
 #include <QStackedLayout>
 #include <QGridLayout>
 #include <QResizeEvent>
-#include "../videowidget/videowidget.h"
+#include "../videodecoder/VideoDecoder.h"
 
 
 class Videoplayer : public QWidget {
@@ -59,7 +59,7 @@ public:
 private:
 
 
-    VideoWidget *m_videoWidget;
+    VideoDecoder *m_videoDecoder;
     QTimer *m_progresss_timer;
     QTimer *m_timelabel_timer;
 
