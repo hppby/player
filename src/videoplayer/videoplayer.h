@@ -61,6 +61,7 @@ private:
 
     VideoWidget *m_videoWidget;
     QTimer *m_progresss_timer;
+    QTimer *m_timelabel_timer;
 
     QTimer *m_timer;
     QLabel *m_titleLabel;
@@ -118,6 +119,11 @@ private:
 
 //private slots:
     void showControlBox();
+
+    QString secondsToHms(int seconds);
+
+    void progresssValueChanged();
+    void handleProgressChanged(int addProgress);
 
  public:
     //重写虚函数
