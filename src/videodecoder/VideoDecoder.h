@@ -2,8 +2,8 @@
 // Created by LOOG LS on 2024/6/11.
 //
 
-#ifndef PLAYER_VIDEOWIDGET_H
-#define PLAYER_VIDEOWIDGET_H
+#ifndef PLAYER_VIDEODECODER_H
+#define PLAYER_VIDEODECODER_H
 
 
 #include <QWidget>
@@ -26,10 +26,12 @@ extern "C" {
 #include <libavutil/frame.h>
 }
 
-class VideoWidget : public QWidget {
+class VideoDecoderThread;
+
+class VideoDecoder : public QObject {
 Q_OBJECT
 public:
-    explicit VideoWidget(QWidget *parent = nullptr, QLabel *playView = nullptr);
+    explicit VideoDecoder(QWidget *parent = nullptr, QLabel *playView = nullptr);
     bool openFile(QString fileName);
 
     // true: 播放，false: 暂停
@@ -41,17 +43,18 @@ public:
 
     void onSoundOff();
 
-  double getCurrentTime() const;
-  double getDuration() const;
+    double getCurrentTime() const;
+    double getDuration() const;
 
     void changePlaybackProgress(int64_t target_time_seconds);
 
+    void decodeLoop();
 
     QSize videoSize;
 
     bool isChangedWindowSize;
 
-    ~VideoWidget();
+    ~VideoDecoder();
 
 
 signals:
@@ -60,6 +63,9 @@ signals:
 private slots:
 
 private:
+
+    VideoDecoderThread *videoDecoderThread = nullptr;
+
     AVFormatContext *fmt_ctx = nullptr;
     AVCodecContext *video_dec_ctx = nullptr;
     AVCodecContext *audio_dec_ctx = nullptr;
@@ -83,8 +89,11 @@ private:
     double  m_currentTime;
 
     bool isRunning;
+    bool isChangedProgress;
 
-    void decodeLoop();
+    QTimer *m_progressTimer;
+
+
 
     bool initDecode(QString fileName);
     bool initDecoder(int streamIndex, AVCodecContext **ctx);
@@ -120,4 +129,4 @@ private:
 };
 
 
-#endif //PLAYER_VIDEOWIDGET_H
+#endif //PLAYER_VIDEODECODER_H

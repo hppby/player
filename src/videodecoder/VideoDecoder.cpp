@@ -2,7 +2,7 @@
 // Created by LOOG LS on 2024/6/11.
 //
 
-#include "videowidget.h"
+#include "VideoDecoder.h"
 #include <QPainter>
 #include <QMutex>
 #include <QWaitCondition>
@@ -12,18 +12,18 @@
 #include <SDL2/SDL_mixer.h>
 #include <iostream>
 #include <QReadLocker>
+#include "VideoDecoderThread.h"
 
 
-
-VideoWidget::VideoWidget(QWidget *parent, QLabel *playerLabel)
-        : QWidget(parent) {
+VideoDecoder::VideoDecoder(QWidget *parent, QLabel *playerLabel)
+        : QObject(parent) {
 
     m_playView = playerLabel;
     // 初始化FFmpeg库
     avformat_network_init();
 }
 
-bool VideoWidget::openFile(QString fileName) {
+bool VideoDecoder::openFile(QString fileName) {
     this->isRunning = this->initDecode(fileName);
 
     if (!this->isRunning) {
@@ -31,27 +31,19 @@ bool VideoWidget::openFile(QString fileName) {
         return false;
     }
 
-    connect(this, &VideoWidget::videoImageChanged, this, [=](QPixmap pixmap){
+    connect(this, &VideoDecoder::videoImageChanged, this, [=](QPixmap pixmap){
         if (!pixmap.isNull()) {
 
             QSize size = this->m_playView->size();
-
-//            if (size.width() / size.height() > pixmap.width() / pixmap.height()) {
-//                pixmap.scaled(size.width(), size.height(), Qt::KeepAspectRatio);
-//            } else {
-//                pixmap.scaled(size.width(), size.height(), Qt::KeepAspectRatio);
-//            };
-
-            qDebug() << "===size===" << this->m_playView->size();
-
+            pixmap.scaled(size.width(), size.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
             this->m_playView->setPixmap(pixmap);
-            pixmap.scaled(size.width() / 2, size.height()/2, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-//            this->m_playView->setScaledContents(true);
         }
     });
 
-    std::thread decodeThread(&VideoWidget::decodeLoop, this);
-    decodeThread.detach();
+    videoDecoderThread = new VideoDecoderThread(this);
+
+    QThreadPool::globalInstance()->start(videoDecoderThread);
+
     isChangedWindowSize = false;
     return true;
 }
@@ -71,7 +63,7 @@ void freeAudioFifo(AVAudioFifo **fifo) {
     }
 }
 
-bool VideoWidget::initSDL() {
+bool VideoDecoder::initSDL() {
     // 初始化SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { // 根据需要可以只初始化音频 SDL_INIT_AUDIO
         qDebug() << "SDL could not initialize! SDL_Error: " << SDL_GetError() ;
@@ -109,7 +101,7 @@ bool VideoWidget::initSDL() {
     return true;
 }
 
-void VideoWidget::closeFile() {
+void VideoDecoder::closeFile() {
 
     qDebug() << "===closeFile===";
 
@@ -129,6 +121,9 @@ void VideoWidget::closeFile() {
         sws_freeContext(video_sws_ctx);
         video_sws_ctx = nullptr;
     }
+    if (videoDecoderThread) {
+        videoDecoderThread = nullptr;
+    }
 
     // 停止播放并清理
     SDL_PauseAudioDevice(audioDeviceId, 1);
@@ -139,7 +134,7 @@ void VideoWidget::closeFile() {
 }
 
 // 初始化SwrContext用于音频格式转换
-SwrContext* VideoWidget::initSwrContext(AVCodecContext *audio_dec_ctx) {
+SwrContext* VideoDecoder::initSwrContext(AVCodecContext *audio_dec_ctx) {
     SwrContext *swrCtx = swr_alloc();
     if (!swrCtx) {
         qDebug() << "Could not allocate resampler context";
@@ -162,7 +157,7 @@ SwrContext* VideoWidget::initSwrContext(AVCodecContext *audio_dec_ctx) {
     return swrCtx;
 }
 
-bool VideoWidget::initDecode(QString fileName) {
+bool VideoDecoder::initDecode(QString fileName) {
     this->closeFile(); // 先释放旧资源
     QByteArray ba = fileName.toLocal8Bit();
     const char *c_filename = ba.data();
@@ -207,7 +202,7 @@ bool VideoWidget::initDecode(QString fileName) {
 }
 
 // 辅助函数
-bool VideoWidget::openInputFile(const char *filename) {
+bool VideoDecoder::openInputFile(const char *filename) {
     if (avformat_open_input(&fmt_ctx, filename, nullptr, nullptr) != 0) {
         qDebug() << "打开视频文件--失败";
         return false;
@@ -216,7 +211,7 @@ bool VideoWidget::openInputFile(const char *filename) {
     return true;
 }
 
-bool VideoWidget::fetchStreamInfo() {
+bool VideoDecoder::fetchStreamInfo() {
     if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
         qDebug() << "获取流信息--失败";
         return false;
@@ -236,7 +231,7 @@ bool VideoWidget::fetchStreamInfo() {
     return true;
 }
 
-bool VideoWidget::initDecoder(int streamIndex, AVCodecContext **ctx) {
+bool VideoDecoder::initDecoder(int streamIndex, AVCodecContext **ctx) {
     const AVCodecParameters *codecpar = fmt_ctx->streams[streamIndex]->codecpar;
     const AVCodec *codec = avcodec_find_decoder(codecpar->codec_id);
     if (!codec) {
@@ -263,7 +258,7 @@ bool VideoWidget::initDecoder(int streamIndex, AVCodecContext **ctx) {
 
 
 
-QImage VideoWidget::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
+QImage VideoDecoder::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
 
     // 检查sws_ctx有效性，避免空指针调用
     if (!sws_ctx) {
@@ -300,7 +295,7 @@ QImage VideoWidget::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
 
 
 // 处理解码后的AVFrame
-void VideoWidget::processAudioFrame(AVFrame* frame) {
+void VideoDecoder::processAudioFrame(AVFrame* frame) {
 
     // 注意：下面的代码应当使用frame而非新分配的input_frame
     const int outBufferSize = av_samples_get_buffer_size(nullptr, 2, frame->nb_samples, AV_SAMPLE_FMT_S16, 1); // 假设输出为双声道
@@ -331,7 +326,7 @@ void VideoWidget::processAudioFrame(AVFrame* frame) {
 }
 
 // 解码音频帧
-void VideoWidget::decodeAudioFrame(AVPacket &pkt, AVFrame *audioFrame) {
+void VideoDecoder::decodeAudioFrame(AVPacket &pkt, AVFrame *audioFrame) {
     int sendResult = avcodec_send_packet(audio_dec_ctx, &pkt);
     if (sendResult < 0) {
         qDebug() << "Error sending packet to decoder: " << av_err2str(sendResult) ;
@@ -353,28 +348,20 @@ void VideoWidget::decodeAudioFrame(AVPacket &pkt, AVFrame *audioFrame) {
     }
 }
 
-void VideoWidget::decodeVideoFrame(AVPacket &pkt, AVFrame *decodedFrame) {
+void VideoDecoder::decodeVideoFrame(AVPacket &pkt, AVFrame *decodedFrame) {
 
     if (!this->isRunning) {
         return;
     }
-
-    qDebug() << "===decodeVideoFrame===" << this->isRunning;
-
     if (this->isRunning && avcodec_send_packet(video_dec_ctx, &pkt) >= 0) {
-        qDebug() << "===1===";
         while (avcodec_receive_frame(video_dec_ctx, decodedFrame) == 0) {
-            qDebug() << "===2===";
             if (!this->isRunning) {
                 break;
             }
-            qDebug() << "===3===";
             QImage newFrame = this->convertToQImage(decodedFrame, video_sws_ctx);
             QPixmap pixmap = QPixmap::fromImage(newFrame);
             if (!pixmap.isNull()) {
-//                pixmap.scaled(this->videoSize, Qt::KeepAspectRatio);
-//                this->m_playView->setPixmap(pixmap);
-emit this->videoImageChanged(pixmap);
+                emit this->videoImageChanged(pixmap);
             }
         }
     }
@@ -382,7 +369,7 @@ emit this->videoImageChanged(pixmap);
 }
 
 
-void VideoWidget::decodeLoop() {
+void VideoDecoder::decodeLoop() {
     AVFrame *videoFrame = av_frame_alloc();
     AVFrame *audioFrame = av_frame_alloc();
 
@@ -432,70 +419,85 @@ void VideoWidget::decodeLoop() {
 
 
 
-bool VideoWidget::startOrPause() {
+bool VideoDecoder::startOrPause() {
     if (this->isRunning) {
         this->isRunning = false;
         SDL_PauseAudioDevice(audioDeviceId, 1);
+        videoDecoderThread = nullptr;
     } else {
         this->isRunning = true;
         SDL_PauseAudioDevice(audioDeviceId, 0);
-        std::thread decodeThread(&VideoWidget::decodeLoop, this);
-        decodeThread.detach();
+        videoDecoderThread = new VideoDecoderThread(this);
+        QThreadPool::globalInstance()->start(videoDecoderThread);
     }
 
     return this->isRunning;
 }
 
-void VideoWidget::changeVolume(int volume) {
+void VideoDecoder::changeVolume(int volume) {
 // 设置音量，范围为0（静音）到MIX_MAX_VOLUME（最大音量，通常是128）
     Mix_VolumeMusic(MIX_MAX_VOLUME * volume / 100);
     Mix_Volume(2, MIX_MAX_VOLUME * volume / 100);
     qDebug() << "===changeVolume===" << volume;
 }
 
-VideoWidget::~VideoWidget() {
+VideoDecoder::~VideoDecoder() {
 
     // 释放资源
     this->closeFile();
 }
 
-void VideoWidget::onSoundOff() {
+void VideoDecoder::onSoundOff() {
 }
 
 
-double VideoWidget::getCurrentTime() const {
+double VideoDecoder::getCurrentTime() const {
 //    QReadLocker locker(&rwLock); // 锁定读锁
     return this->m_currentTime;
 }
 
-double VideoWidget::getDuration() const {
+double VideoDecoder::getDuration() const {
 //    QReadLocker locker(&rwLock);
     return this->m_duration;
 }
 
-void VideoWidget::changePlaybackProgress(int64_t target_time_seconds) {
+void VideoDecoder::changePlaybackProgress(int64_t target_time_seconds) {
     this->isRunning = false;
-    // 目标播放时间，例如跳转到10秒处
-    int64_t target_time_in_ts = av_rescale_q(target_time_seconds, AVRational{1, AV_TIME_BASE}, fmt_ctx->streams[video_stream_index]->time_base);
 
-    // 寻找最近的关键帧
-    int seek_result = av_seek_frame(fmt_ctx, video_stream_index, target_time_in_ts, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
-    if (seek_result < 0) {
-        fprintf(stderr, "Error seeking frame: %s\n", av_err2str(seek_result));
-        return;
-    }
+    m_progressTimer = new QTimer(this);
+    videoDecoderThread = nullptr;
+    connect(m_progressTimer, &QTimer::timeout, this, [=]() {
 
-    // 重置解码器
-    avcodec_flush_buffers(video_dec_ctx);
-    this->isRunning = true;
+        qDebug() << "===target_time_seconds===" << target_time_seconds;
 
-    auto *thread = new QThread(this);
+        // 目标播放时间，例如跳转到10秒处
 
-    std::thread decodeThread(&VideoWidget::decodeLoop, this);
-    decodeThread.detach();
+        // 寻找最近的关键帧
+        int seek_result = av_seek_frame(fmt_ctx, video_stream_index, target_time_seconds, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+        if (seek_result < 0) {
+            fprintf(stderr, "Error seeking frame: %s\n", av_err2str(seek_result));
+            return;
+        }
+
+        qDebug() << "===seek_result===" << seek_result;
+
+        // 重置解码器
+        avcodec_flush_buffers(video_dec_ctx);
+        avcodec_flush_buffers(audio_dec_ctx);
+        this->isRunning = true;
+
+        videoDecoderThread = new VideoDecoderThread(this);
+        QThreadPool::globalInstance()->start(videoDecoderThread);
+
+        m_progressTimer->stop();
+    });
+
+    m_progressTimer->start(100);
+//    QThread::sleep(50);
+
 }
 
-bool VideoWidget::stop() {
+bool VideoDecoder::stop() {
     this->isRunning = false;
     return false;
 }

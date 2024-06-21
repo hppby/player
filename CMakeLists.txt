@@ -34,8 +34,10 @@ set(PROJECT_SOURCES
         src/home/home.h
         src/videoplayer/videoplayer.cpp
         src/videoplayer/videoplayer.h
-        src/videowidget/videowidget.cpp
-        src/videowidget/videowidget.h
+        src/videodecoder/VideoDecoder.cpp
+        src/videodecoder/VideoDecoder.h
+        src/videodecoder/VideoDecoderThread.cpp
+        src/videodecoder/VideoDecoderThread.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
