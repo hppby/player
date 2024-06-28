@@ -59,21 +59,15 @@ public:
 private:
 
 
-    VideoDecoder *m_videoDecoder;
-    QTimer *m_progresss_timer;
-    QTimer *m_timelabel_timer;
+    VideoDecoder *video_decoder;
 
     QTimer *m_timer;
-    QLabel *m_titleLabel;
 
     QLabel *m_playView;
 
-    QWidget *headerContent;
     QWidget *controlBox;
 
     QMediaPlayer *player;
-    QVideoWidget *videoWidget;
-    QAudioOutput *audiooutput;
 
     QPushButton *m_voicebutton;
     QSlider *m_voiceslider;
@@ -90,6 +84,7 @@ private:
     QString m_resource;
 
 
+    double current_time;
     int m_voice;
     QRect m_rect;
     bool isProgressMoving;
@@ -99,8 +94,6 @@ private:
     int m_headerHeight;
     int m_controlHeight;
 
-    QString totalFormattedTime;
-    QString currentFormattedTime;
 
     // 初始化播放器
     void InitPlayer();
@@ -108,11 +101,6 @@ private:
     // 初始化播放组件
     void InitControl();
 
-    // 初始化ffemg组件
-//    int playvideo(QString videoPath);
-
-    // 初始化页头
-    void InitHeader();
 
     // 设置按钮图标
     void ButtonStyleSet(QPushButton *button, QString IconPath);
@@ -130,7 +118,6 @@ private:
     //鼠标移动事件
 
 public slots:
-    void videoImagehandler(QImage *image);
     void mouseMoveEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 };

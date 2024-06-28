@@ -12,7 +12,11 @@
 #include <SDL2/SDL_mixer.h>
 #include <iostream>
 #include <QReadLocker>
-#include "VideoDecoderThread.h"
+
+#include <unistd.h>
+#include "ReadFrameThread.h"
+#include "DecodeVideo.h"
+#include "DecodeAudio.h"
 
 
 VideoDecoder::VideoDecoder(QWidget *parent, QLabel *playerLabel)
@@ -21,418 +25,95 @@ VideoDecoder::VideoDecoder(QWidget *parent, QLabel *playerLabel)
     m_playView = playerLabel;
     // 初始化FFmpeg库
     avformat_network_init();
+    this->isRunning = false;
 }
 
 bool VideoDecoder::openFile(QString fileName) {
-    this->isRunning = this->initDecode(fileName);
+    this->initDecode(fileName);
 
-    if (!this->isRunning) {
-        this->closeFile();
-        return false;
-    }
-
-    connect(this, &VideoDecoder::videoImageChanged, this, [=](QPixmap pixmap){
-        if (!pixmap.isNull()) {
-
-            QSize size = this->m_playView->size();
-            pixmap.scaled(size.width(), size.height(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            this->m_playView->setPixmap(pixmap);
-        }
-    });
-
-    videoDecoderThread = new VideoDecoderThread(this);
-
-    QThreadPool::globalInstance()->start(videoDecoderThread);
+    this->startOrPause();
 
     isChangedWindowSize = false;
     return true;
 }
 
-// 定义音频参数
-const int SAMPLE_RATE = 44100; // 采样率，常见值如 44100, 48000 等
-const Uint16 FORMAT = AUDIO_S16SYS; // 音频格式，AUDIO_S16SYS 代表系统默认的16位格式
-const int CHANNELS = 2; // 声道数，1为单声道，2为立体声
-const int BUFFER_SIZE = 1024; // 缓冲区大小，单位为样本数
-
-
-// 清理并释放音频FIFO资源
-void freeAudioFifo(AVAudioFifo **fifo) {
-    if (*fifo) {
-        av_audio_fifo_free(*fifo);
-        *fifo = nullptr;
-    }
-}
-
-bool VideoDecoder::initSDL() {
-    // 初始化SDL
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { // 根据需要可以只初始化音频 SDL_INIT_AUDIO
-        qDebug() << "SDL could not initialize! SDL_Error: " << SDL_GetError() ;
-        return false;
-    }
-    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) == -1) {
-        // 处理Mix_OpenAudio错误
-        printf("SDL_mixer could not initialize! SDL_mixer Error: %s\n", Mix_GetError());
-        return false;
-    }
-    Mix_VolumeMusic(MIX_MAX_VOLUME);
-    audioFifo = av_audio_fifo_alloc(AV_SAMPLE_FMT_S16, CHANNELS, 1000);
-    if (!audioFifo) {
-        qDebug() << "Could not allocate audio FIFO." ;
-        return false;
-    }
-
-    desiredSpec.freq = SAMPLE_RATE;
-    desiredSpec.format = FORMAT;
-    desiredSpec.channels = CHANNELS;
-    desiredSpec.samples = BUFFER_SIZE; // 单次回调的样本数
-    desiredSpec.callback = nullptr; // 如果使用队列方式，则不需要回调
-    desiredSpec.userdata = nullptr;
-
-    // 打开音频设备
-    audioDeviceId = SDL_OpenAudioDevice(nullptr, 0, &desiredSpec, nullptr, 0);
-    if (audioDeviceId == 0) {
-        SDL_Quit();
-        return false;
-    }
-
-    // 开始音频播放
-    SDL_PauseAudioDevice(audioDeviceId, 0);
-
-    return true;
-}
-
-void VideoDecoder::closeFile() {
-
-    qDebug() << "===closeFile===";
-
-    if (fmt_ctx) {
-        avformat_close_input(&fmt_ctx);
-        fmt_ctx = nullptr;
-    }
-    if (video_dec_ctx) {
-        avcodec_free_context(&video_dec_ctx);
-        video_dec_ctx = nullptr;
-    }
-    if (audio_dec_ctx) {
-        avcodec_free_context(&audio_dec_ctx);
-        audio_dec_ctx = nullptr;
-    }
-    if (video_sws_ctx) {
-        sws_freeContext(video_sws_ctx);
-        video_sws_ctx = nullptr;
-    }
-    if (videoDecoderThread) {
-        videoDecoderThread = nullptr;
-    }
-
-    // 停止播放并清理
-    SDL_PauseAudioDevice(audioDeviceId, 1);
-    SDL_CloseAudioDevice(audioDeviceId);
-    SDL_Quit();
-    // 清理
-    freeAudioFifo(&audioFifo);
-}
-
-// 初始化SwrContext用于音频格式转换
-SwrContext* VideoDecoder::initSwrContext(AVCodecContext *audio_dec_ctx) {
-    SwrContext *swrCtx = swr_alloc();
-    if (!swrCtx) {
-        qDebug() << "Could not allocate resampler context";
-        return nullptr;
-    }
-
-    av_opt_set_int(swrCtx, "in_channel_layout", av_get_default_channel_layout(audio_dec_ctx->channels), 0);
-    av_opt_set_int(swrCtx, "out_channel_layout", av_get_default_channel_layout(2), 0);
-    av_opt_set_int(swrCtx, "in_sample_rate", audio_dec_ctx->sample_rate, 0);
-    av_opt_set_int(swrCtx, "out_sample_rate", audio_dec_ctx->sample_rate, 0);
-    av_opt_set_sample_fmt(swrCtx, "in_sample_fmt", audio_dec_ctx->sample_fmt, 0);
-    av_opt_set_sample_fmt(swrCtx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
-
-    if (swr_init(swrCtx) < 0) {
-        qDebug() << "Failed to initialize the resampler context" ;
-        swr_free(&swrCtx);
-        return nullptr;
-    }
-
-    return swrCtx;
-}
 
 bool VideoDecoder::initDecode(QString fileName) {
-    this->closeFile(); // 先释放旧资源
     QByteArray ba = fileName.toLocal8Bit();
     const char *c_filename = ba.data();
 
     // 打开视频文件
-    if (!this->openInputFile(c_filename)) return false;
-
-    // 获取流信息
-    if (!this->fetchStreamInfo()) return false;
-
-    // 初始化视频解码器
-    if (!this->initDecoder(video_stream_index, &video_dec_ctx)) return false;
-
-    // 初始化音频解码器
-    if (audio_stream_index >= 0 && !this->initDecoder(audio_stream_index, &audio_dec_ctx)) return false;
-
-    // 初始化转换上下文
-    video_sws_ctx = sws_getContext(video_dec_ctx->width, video_dec_ctx->height,
-                                   video_dec_ctx->pix_fmt,
-                                   video_dec_ctx->width, video_dec_ctx->height,
-                                   AV_PIX_FMT_RGB32,
-                                   SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-    audio_swr_ctx = this->initSwrContext(audio_dec_ctx);
-
-    if (!audio_swr_ctx) {
-        qDebug() << "Could not allocate resampler context";
-        return false;
-    }
-
-    if (!video_sws_ctx) {
-        qDebug() << "初始化转换上下文--失败";
-        return false;
-    }
-
-    if (!this->initSDL()) {
-        qDebug() << "初始化SDL--失败";
-        return false;
-    }
-
-    return true;
-}
-
-// 辅助函数
-bool VideoDecoder::openInputFile(const char *filename) {
-    if (avformat_open_input(&fmt_ctx, filename, nullptr, nullptr) != 0) {
+    if (avformat_open_input(&fmt_ctx, c_filename, nullptr, nullptr) != 0) {
         qDebug() << "打开视频文件--失败";
         return false;
     }
 
-    return true;
-}
-
-bool VideoDecoder::fetchStreamInfo() {
+    // 获取流信息
     if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
         qDebug() << "获取流信息--失败";
         return false;
     }
 
-    this->m_duration = (double)fmt_ctx->duration / AV_TIME_BASE;
-
-    video_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    audio_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    if (video_stream_index < 0) {
-        qDebug() << "查找视频流--失败";
+    decode_video = new DecodeVideo(this, fmt_ctx);
+    if (!decode_video->init()) {
+        qDebug() << "初始化视频解码器--失败";
         return false;
     }
-    video_stream = fmt_ctx->streams[video_stream_index];
-    audio_stream = fmt_ctx->streams[audio_stream_index];
-    qDebug() << "找到视频流";
+
+    connect(decode_video, &DecodeVideo::videoImageChanged, this, &VideoDecoder::videoImageChanged);
+    connect(decode_video, &DecodeVideo::currentTimeChanged, this, &VideoDecoder::currentTimeChanged);
+
+
+
+    decode_audio = new DecodeAudio(fmt_ctx);
+    if (!decode_audio->init()) {
+        qDebug() << "初始化音频解码器--失败";
+        return false;
+    }
+
+    connect(this, &VideoDecoder::start, decode_audio, &DecodeAudio::startOrPause);
+    connect(this, &VideoDecoder::start, decode_video, &DecodeVideo::startOrPause);
+
+    this->m_duration = (double) fmt_ctx->duration / AV_TIME_BASE;
+
+
     return true;
 }
 
-bool VideoDecoder::initDecoder(int streamIndex, AVCodecContext **ctx) {
-    const AVCodecParameters *codecpar = fmt_ctx->streams[streamIndex]->codecpar;
-    const AVCodec *codec = avcodec_find_decoder(codecpar->codec_id);
-    if (!codec) {
-        qDebug() << QString("查找解码器--失败 (流类型: %1)").arg(streamIndex == video_stream_index ? "视频" : "音频");
-        return false;
-    }
-    *ctx = avcodec_alloc_context3(codec);
-    if (!(*ctx)) {
-        qDebug() << QString("分配解码器上下文--失败 (流类型: %1)").arg(
-                streamIndex == video_stream_index ? "视频" : "音频");
-        return false;
-    }
-    if (avcodec_parameters_to_context(*ctx, codecpar) < 0) {
-        qDebug() << QString("复制编解码参数到解码上下文--失败 (流类型: %1)").arg(
-                streamIndex == video_stream_index ? "视频" : "音频");
-        return false;
-    }
-    if (avcodec_open2(*ctx, codec, nullptr) < 0) {
-        qDebug() << QString("打开解码器--失败 (流类型: %1)").arg(streamIndex == video_stream_index ? "视频" : "音频");
-        return false;
-    }
-    return true;
-}
+void VideoDecoder::readFrameLoop() {
 
 
-
-QImage VideoDecoder::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
-
-    // 检查sws_ctx有效性，避免空指针调用
-    if (!sws_ctx) {
-        qDebug() << "SwsContext is null!";
-        return QImage(); // 或者根据需要抛出异常
-    }
-  if (!src_frame) {
-        qDebug() << "src_frame is null!";
-        return QImage(); // 或者根据需要抛出异常
-    }
-
-    // 确保目标图像的大小与源帧匹配
-    QImage dest(src_frame->width, src_frame->height, QImage::Format_RGB32);
-
-    // 设置转换参数
-    uint8_t *dst_data[4] = {dest.bits(), nullptr, nullptr, nullptr}; // RGB32格式只需第一个指针
-    int dst_linesize[4]; // 其余为0，因为RGB32是平面格式
-    dst_linesize[0] = static_cast<int>(dest.bytesPerLine()); // 显式类型转换
-    dst_linesize[1] = 0;
-    dst_linesize[2] = 0;
-    dst_linesize[3] = 0;
-
-    // 执行转换并检查是否成功
-    int result = sws_scale(sws_ctx, src_frame->data, src_frame->linesize, 0, src_frame->height,
-                           dst_data, dst_linesize);
-    if (result <= 0) {
-        qDebug() << "sws_scale failed with error code:" << result;
-        return QImage(); // 或者根据需要处理错误
-    }
-
-    // 返回转换后的图像
-    return dest;
-}
-
-
-// 处理解码后的AVFrame
-void VideoDecoder::processAudioFrame(AVFrame* frame) {
-
-    // 注意：下面的代码应当使用frame而非新分配的input_frame
-    const int outBufferSize = av_samples_get_buffer_size(nullptr, 2, frame->nb_samples, AV_SAMPLE_FMT_S16, 1); // 假设输出为双声道
-    if (outBufferSize <= 0) {
-        qDebug() << "Error calculating output buffer size." ;
-        return;
-    }
-
-    // 分配输出缓冲区
-    uint8_t* output_data = (uint8_t*)av_malloc(outBufferSize); // 动态分配单个缓冲区，而非指针数组
-
-    // 转换音频数据
-    int ret = swr_convert(audio_swr_ctx,
-                          &output_data, frame->nb_samples,
-                          (const uint8_t **)frame->data, frame->nb_samples); // 使用frame作为输入
-
-    if (ret < 0) {
-        qDebug() << "Error converting audio frame." ;
-        return;
-    }
-
-    // 将转换后的音频数据送入SDL音频设备的队列
-    int queued = SDL_QueueAudio(audioDeviceId, output_data, outBufferSize);
-    if (queued < 0) {
-        qDebug() << "SDL_QueueAudio failed: " << SDL_GetError() ;
-    }
-
-}
-
-// 解码音频帧
-void VideoDecoder::decodeAudioFrame(AVPacket &pkt, AVFrame *audioFrame) {
-    int sendResult = avcodec_send_packet(audio_dec_ctx, &pkt);
-    if (sendResult < 0) {
-        qDebug() << "Error sending packet to decoder: " << av_err2str(sendResult) ;
-        return;
-    }
-
-    while (sendResult >= 0 && this->isRunning) {
-        sendResult = avcodec_receive_frame(audio_dec_ctx, audioFrame);
-        if (sendResult == AVERROR(EAGAIN) || sendResult == AVERROR_EOF) {
-            break;
-        } else if (sendResult < 0) {
-            qDebug() << "Error during decoding: " << av_err2str(sendResult) ;
-            return;
+    while (this->isRunning) {
+        my_mutex.lock();
+        AVPacket *pkt = av_packet_alloc();
+        if (pkt) {
+            av_packet_unref(pkt);
+        } else {
+            pkt = av_packet_alloc();
+            continue;
         }
-
-        // 假设processAudioFrame处理音频帧
-        this->processAudioFrame(audioFrame);
-        av_frame_unref(audioFrame);
-    }
-}
-
-void VideoDecoder::decodeVideoFrame(AVPacket &pkt, AVFrame *decodedFrame) {
-
-    if (!this->isRunning) {
-        return;
-    }
-    if (this->isRunning && avcodec_send_packet(video_dec_ctx, &pkt) >= 0) {
-        while (avcodec_receive_frame(video_dec_ctx, decodedFrame) == 0) {
-            if (!this->isRunning) {
-                break;
-            }
-            QImage newFrame = this->convertToQImage(decodedFrame, video_sws_ctx);
-            QPixmap pixmap = QPixmap::fromImage(newFrame);
-            if (!pixmap.isNull()) {
-                emit this->videoImageChanged(pixmap);
-            }
-        }
-    }
-    av_frame_unref(decodedFrame);
-}
-
-
-void VideoDecoder::decodeLoop() {
-    AVFrame *videoFrame = av_frame_alloc();
-    AVFrame *audioFrame = av_frame_alloc();
-
-    bool isEnd = false;
-
-    while (!isEnd && this->isRunning) {
-        AVPacket pkt;
-        if (av_read_frame(fmt_ctx, &pkt) < 0) {
-            isEnd = true;
-            break;
+        if (av_read_frame(fmt_ctx, pkt) < 0) {
+//            isEnd = true;
+//            break;
+            my_mutex.unlock();
+            continue;
         };
+        my_mutex.unlock();
 
-        av_frame_unref(videoFrame);
-        av_frame_unref(audioFrame);
+        if (pkt->stream_index == decode_video->video_stream_index) {
+            decode_video->addPacket(pkt);
+        } else if (pkt->stream_index == decode_audio->audio_stream_index) {
+            decode_audio->addPacket(pkt);
+        } else {
 
-
-        if (pkt.stream_index == video_stream_index) {
-            this->decodeVideoFrame(pkt, videoFrame);
-
-            // 计算当前时间
-            AVRational time_base = fmt_ctx->streams[video_stream_index]->time_base; // 获取视频流的时间基
-            int64_t pts_time = pkt.pts != AV_NOPTS_VALUE ? pkt.pts : pkt.dts; // 使用pts或dts作为参考，优先pts
-            double currentTime = av_q2d(time_base) * pts_time; // 将pts/dts转换为秒
-
-            m_currentTime = currentTime;
-
-        } else if (pkt.stream_index == audio_stream_index) {
-            this->decodeAudioFrame(pkt, audioFrame);
         }
+        av_packet_free(&pkt);
 
-
-        av_packet_unref(&pkt);
     }
 
-    av_frame_free(&videoFrame);
-    av_frame_free(&audioFrame);
 
-    if (isEnd) {
-        this->closeFile();
-    }
 }
 
-
-
-
-
-
-
-
-bool VideoDecoder::startOrPause() {
-    if (this->isRunning) {
-        this->isRunning = false;
-        SDL_PauseAudioDevice(audioDeviceId, 1);
-        videoDecoderThread = nullptr;
-    } else {
-        this->isRunning = true;
-        SDL_PauseAudioDevice(audioDeviceId, 0);
-        videoDecoderThread = new VideoDecoderThread(this);
-        QThreadPool::globalInstance()->start(videoDecoderThread);
-    }
-
-    return this->isRunning;
-}
 
 void VideoDecoder::changeVolume(int volume) {
 // 设置音量，范围为0（静音）到MIX_MAX_VOLUME（最大音量，通常是128）
@@ -443,63 +124,61 @@ void VideoDecoder::changeVolume(int volume) {
 
 VideoDecoder::~VideoDecoder() {
 
-    // 释放资源
-    this->closeFile();
 }
 
 void VideoDecoder::onSoundOff() {
 }
 
 
-double VideoDecoder::getCurrentTime() const {
-//    QReadLocker locker(&rwLock); // 锁定读锁
-    return this->m_currentTime;
-}
 
-double VideoDecoder::getDuration() const {
-//    QReadLocker locker(&rwLock);
+
+double VideoDecoder::getDuration() {
     return this->m_duration;
 }
 
-void VideoDecoder::changePlaybackProgress(int64_t target_time_seconds) {
+void VideoDecoder::changeProgress(int targetTimeSeconds) {
     this->isRunning = false;
 
-    m_progressTimer = new QTimer(this);
-    videoDecoderThread = nullptr;
-    connect(m_progressTimer, &QTimer::timeout, this, [=]() {
 
-        qDebug() << "===target_time_seconds===" << target_time_seconds;
-
-        // 目标播放时间，例如跳转到10秒处
+        qDebug() << "===target_time_seconds===" << targetTimeSeconds;
 
         // 寻找最近的关键帧
-        int seek_result = av_seek_frame(fmt_ctx, video_stream_index, target_time_seconds, AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+        int seek_result = av_seek_frame(fmt_ctx, decode_video->video_stream_index, targetTimeSeconds,
+                                        AVSEEK_FLAG_BACKWARD | AVSEEK_FLAG_ANY);
+
         if (seek_result < 0) {
             fprintf(stderr, "Error seeking frame: %s\n", av_err2str(seek_result));
             return;
         }
 
-        qDebug() << "===seek_result===" << seek_result;
-
         // 重置解码器
-        avcodec_flush_buffers(video_dec_ctx);
-        avcodec_flush_buffers(audio_dec_ctx);
+        avcodec_flush_buffers(decode_video->video_dec_ctx);
+        avcodec_flush_buffers(decode_audio->audio_dec_ctx);
         this->isRunning = true;
 
-        videoDecoderThread = new VideoDecoderThread(this);
-        QThreadPool::globalInstance()->start(videoDecoderThread);
 
-        m_progressTimer->stop();
-    });
-
-    m_progressTimer->start(100);
-//    QThread::sleep(50);
 
 }
 
 bool VideoDecoder::stop() {
     this->isRunning = false;
     return false;
+}
+
+bool VideoDecoder::startOrPause() {
+    if (isRunning) {
+        this->isRunning = false;
+        readFrameThread = nullptr;
+    } else {
+        this->isRunning = true;
+        readFrameThread = new ReadFrameThread(this);
+        QThreadPool::globalInstance()->start(readFrameThread);
+    }
+
+    emit  start(this->isRunning);
+
+    return true;
+
 }
 
 
