@@ -24,9 +24,13 @@ extern "C" {
 #include <libavutil/opt.h>
 #include <libavutil/audio_fifo.h>
 #include <libavutil/frame.h>
+#include <libavutil/time.h>
+#include <libavutil/channel_layout.h>
 }
 
-class VideoDecoderThread;
+class ReadFrameThread;
+class DecodeVideo;
+class DecodeAudio;
 
 class VideoDecoder : public QObject {
 Q_OBJECT
@@ -34,8 +38,7 @@ public:
     explicit VideoDecoder(QWidget *parent = nullptr, QLabel *playView = nullptr);
     bool openFile(QString fileName);
 
-    // true: 播放，false: 暂停
-    bool startOrPause();
+    void readFrameLoop();
 
     bool stop();
 
@@ -43,12 +46,11 @@ public:
 
     void onSoundOff();
 
-    double getCurrentTime() const;
-    double getDuration() const;
+    double getDuration();
 
-    void changePlaybackProgress(int64_t target_time_seconds);
+    void changeProgress(int targetTimeSeconds);
 
-    void decodeLoop();
+    bool startOrPause();
 
     QSize videoSize;
 
@@ -59,26 +61,24 @@ public:
 
 signals:
     void videoImageChanged(QPixmap pixmap);
+    void currentTimeChanged(double currentTime);
+
+    void start(bool pause);
 
 private slots:
 
 private:
 
-    VideoDecoderThread *videoDecoderThread = nullptr;
+    DecodeVideo *decode_video;
+    DecodeAudio *decode_audio;
+
+    ReadFrameThread *readFrameThread;
 
     AVFormatContext *fmt_ctx = nullptr;
-    AVCodecContext *video_dec_ctx = nullptr;
-    AVCodecContext *audio_dec_ctx = nullptr;
 
-    AVStream *video_stream = nullptr;
-    AVStream *audio_stream = nullptr;
+    QMutex my_mutex;
 
-    int video_stream_index = -1;
-    int audio_stream_index = -1;
-
-
-    SwsContext *video_sws_ctx = nullptr;
-    SwrContext *audio_swr_ctx = nullptr;
+    int64_t startTime = 0.0;
 
     QImage m_frame;
     QTimer m_timer;
@@ -96,33 +96,10 @@ private:
 
 
     bool initDecode(QString fileName);
-    bool initDecoder(int streamIndex, AVCodecContext **ctx);
-    bool fetchStreamInfo();
-    bool openInputFile(const char *filename);
-
-    void decodeVideoFrame(AVPacket &pkt, AVFrame *decodedFrame);
-
-    QImage convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx);
 
 
-    void decodeAudioFrame(AVPacket &pkt, AVFrame *audioFrame);
 
     QReadWriteLock rwLock;
-    void processAudioFrame(AVFrame* frame);
-    SwrContext* initSwrContext(AVCodecContext *audio_dec_ctx);
-
-
-    bool initSDL();
-
-    // 音频设备
-    SDL_AudioDeviceID audioDeviceId;
-    // 音频FIFO
-    AVAudioFifo *audioFifo;
-    // 设置音频参数
-    SDL_AudioSpec desiredSpec;
-//    void audio_callback(void* userdata, Uint8* stream, int len);
-
-    void closeFile();
 
 
 

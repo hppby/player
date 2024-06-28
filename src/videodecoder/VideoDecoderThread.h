@@ -9,16 +9,17 @@
 #include <QThreadPool>
 
 
-class VideoDecoder;
+class DecodeVideo;
 
 class VideoDecoderThread:public QObject, public QRunnable {
 Q_OBJECT
 
 public:
-    explicit VideoDecoderThread(VideoDecoder *parent = nullptr);
+    explicit VideoDecoderThread(DecodeVideo *parent = nullptr);
 
 private:
-    VideoDecoder *videoDecoder;
+    DecodeVideo *decode_video;
+
 
 protected:
      void run() override;

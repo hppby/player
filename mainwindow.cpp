@@ -74,7 +74,6 @@ void MainWindow::openFile() {
         }
 
 
-
         fileDialog->setAttribute(Qt::WA_DeleteOnClose, true);
         fileDialog->destroyed();
         fileDialog=NULL;

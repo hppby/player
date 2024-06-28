@@ -4,19 +4,17 @@
 
 #include "VideoDecoderThread.h"
 #include <QDebug>
-#include "VideoDecoder.h"
+#include "DecodeVideo.h"
 
-VideoDecoderThread::VideoDecoderThread(VideoDecoder *parent) {
-    this->videoDecoder = parent;
+VideoDecoderThread::VideoDecoderThread(DecodeVideo *parent) {
+    this->decode_video = parent;
 }
 
 
 void VideoDecoderThread::run() {
-qDebug() << "Starting task ";
 
-    this->videoDecoder->decodeLoop();
-// Do some work
-qDebug() << "Finished task " ;
+    this->decode_video->decodeLoop();
+
 }
 
 

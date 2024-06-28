@@ -38,6 +38,14 @@ set(PROJECT_SOURCES
         src/videodecoder/VideoDecoder.h
         src/videodecoder/VideoDecoderThread.cpp
         src/videodecoder/VideoDecoderThread.h
+        src/videodecoder/DecodeVideo.cpp
+        src/videodecoder/DecodeVideo.h
+        src/videodecoder/DecodeAudio.cpp
+        src/videodecoder/DecodeAudio.h
+        src/videodecoder/AudioDecoderThread.cpp
+        src/videodecoder/AudioDecoderThread.h
+        src/videodecoder/ReadFrameThread.cpp
+        src/videodecoder/ReadFrameThread.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
