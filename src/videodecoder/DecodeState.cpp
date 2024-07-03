@@ -35,21 +35,16 @@ DecodeState *DecodeState::getInstance() {
 
 // 构造函数定义，可以在这里进行初始化操作
 DecodeState::DecodeState() {
-    // 初始化逻辑...
-    this->video_packet_queue = new QQueue<AVPacket *>();
-    this->audio_packet_queue = new QQueue<AVPacket *>();
+
 
     this->video_frame_queue = new QList<DecodeFrame *>();
-    this->audio_frame_queue = new QList<AVFrame *>();
+    this->audio_frame_queue = new QList<DecodeFrame *>();
 
     this->skip_duration = 0.0;
 }
 
 void DecodeState::addVideoPacket(AVPacket *pkt) {
-
-
 //    QMutexLocker locker(&video_packet_queue_mutex);
-
     DecodeFrame *frame = new DecodeFrame(pkt);
     frame->index = DecodeState::getInstance()->video_frame_queue->size();
     DecodeState::getInstance()->video_frame_queue->append(frame);
@@ -57,17 +52,11 @@ void DecodeState::addVideoPacket(AVPacket *pkt) {
 }
 
 void DecodeState::addAudioPacket(AVPacket *pkt) {
-    if (!DecodeState::getInstance()->is_playing) return;
 
-    AVPacket *pkt1 = av_packet_alloc();
-    if (!pkt1) {
-        av_packet_unref(pkt1);
-    }
-    pkt1 = av_packet_clone(pkt);
+    DecodeFrame *frame = new DecodeFrame(pkt);
+    frame->index = DecodeState::getInstance()->audio_frame_queue->size();
+    DecodeState::getInstance()->audio_frame_queue->append(frame);
 
-    QMutexLocker locker(&audio_packet_queue_mutex);
-    DecodeState::getInstance()->audio_packet_queue->enqueue(pkt1);
-    av_packet_unref(pkt);
 }
 void DecodeState::addVideoFrame(AVFrame *frame) {
     if (!DecodeState::getInstance()->is_playing) return;
@@ -80,7 +69,7 @@ void DecodeState::addAudioFrame(AVFrame *frame) {
     if (!DecodeState::getInstance()->is_playing) return;
 
     QMutexLocker locker(&audio_packet_queue_mutex);
-    DecodeState::getInstance()->audio_frame_queue->append(frame);
+//    DecodeState::getInstance()->audio_frame_queue->append(frame);
 }
 
 

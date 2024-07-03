@@ -19,7 +19,8 @@ public:
     ~DecodeFrame();
 
     AVPacket *pkt;
-    AVFrame *frame;
+    QList<AVFrame *> *frames;
+//    AVFrame *frame;
 
     int64_t duration;
     int64_t pts;

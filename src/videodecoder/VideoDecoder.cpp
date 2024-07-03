@@ -83,7 +83,7 @@ bool VideoDecoder::initDecode(QString fileName) {
     this->startRead();
 
     // 开始
-//    connect(this, &VideoDecoder::start, decode_audio, &DecodeAudio::start);
+    connect(this, &VideoDecoder::start, decode_audio, &DecodeAudio::start);
     connect(this, &VideoDecoder::start, decode_video, &DecodeVideo::start);
 
     // 播放 / 暂停
@@ -125,7 +125,7 @@ void VideoDecoder::readFrameLoop() {
         if (pkt->stream_index == state->video_stream_index) {
             state->addVideoPacket(pkt);
         } else if (pkt->stream_index == state->audio_stream_index) {
-//            DecodeState::getInstance()->addAudioPacket(pkt);
+            state->addAudioPacket(pkt);
         } else {
 
         }
@@ -202,6 +202,7 @@ void VideoDecoder::onStart(double time) {
     DecodeState::getInstance()->skip_duration = time;
 
     decode_video->startDecode();
+    decode_audio->startDecode();
     emit start(time);
 }
 
@@ -214,6 +215,7 @@ void VideoDecoder::startRead() {
 
  void VideoDecoder::onStop() {
      decode_video->stopDecode();
+     decode_audio->stopDecode();
     DecodeState::getInstance()->is_playing = false;
     emit stop();
 }

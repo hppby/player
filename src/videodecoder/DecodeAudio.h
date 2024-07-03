@@ -25,6 +25,8 @@ extern "C" {
 }
 
 class AudioDecoderThread;
+class DecodeFrame;
+class AudioPlayThread;
 
 class DecodeAudio : public QObject {
 Q_OBJECT
@@ -47,15 +49,20 @@ public:
     bool playAndPause(bool pause);
     void stop();
     void decodeLoop();
+    void playLoop();
 
-    void decodeAudioFrame(AVPacket *pkt);
+    void decodeAudioFrame(DecodeFrame *decode_frame);
 
+
+    void startDecode();
+    void stopDecode();
 
 private:
 
     AudioDecoderThread *audioDecoderThread = nullptr;
+    AudioPlayThread *audioPlayThread = nullptr;
 
-
+    double duration;
 
     // 音频设备
     SDL_AudioDeviceID audio_device_id;

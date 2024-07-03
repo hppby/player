@@ -41,13 +41,14 @@ public:
 
     double skip_duration;
 
+    QList<AVPacket *> *video_packet_queue;
+    QList<AVPacket *> *audio_packet_queue;
     void addVideoPacket(AVPacket *pkt);
     void addAudioPacket(AVPacket *pkt);
-    QQueue<AVPacket *> *video_packet_queue;
-    QQueue<AVPacket *> *audio_packet_queue;
+
 
     QList<DecodeFrame *> *video_frame_queue;
-    QList<AVFrame *> *audio_frame_queue;
+    QList<DecodeFrame *> *audio_frame_queue;
 
     QMutex video_packet_queue_mutex;
     QMutex audio_packet_queue_mutex;

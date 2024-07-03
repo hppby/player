@@ -111,38 +111,51 @@ QImage DecodeVideo::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
 }
 
 void DecodeVideo::decodeVideoFrame(DecodeFrame *decode_frame) {
-
-
     DecodeState *state = DecodeState::getInstance();
-
-    if (!state->is_decoding) return;
-
-
+    if (!state || !state->is_decoding) {
+        return;
+    }
+    QWriteLocker locker(&decode_mutex);
 
     int ret = avcodec_send_packet(state->video_dec_ctx, decode_frame->pkt);
-
     if (ret < 0) {
-        qDebug() << "avcodec_send_packet faild";
+        qDebug() << "avcodec_send_packet failed with error code: " << ret;
         return;
     }
 
-    AVFrame *videoFrame = av_frame_alloc();
-    av_frame_unref(videoFrame);
+    // Initialize frame list outside the loop to avoid re-creation on each iteration.
+    QList<AVFrame *> frames;
 
-    ret = avcodec_receive_frame(state->video_dec_ctx, videoFrame);
+    while (true) {
+        AVFrame *videoFrame = av_frame_alloc();
+        if (!videoFrame) {
+            qDebug() << "Failed to allocate memory for AVFrame";
+            break; // Exit loop if frame allocation fails
+        }
 
+        int receiveResult = avcodec_receive_frame(state->video_dec_ctx, videoFrame);
+        if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
+            // No frame available, or end of stream reached
+            av_frame_free(&videoFrame);
+            break;
+        } else if (receiveResult < 0) {
+            qDebug() << "avcodec_receive_frame failed with error code: " << receiveResult;
+            av_frame_free(&videoFrame);
+            break;
+        }
+
+        frames.append(videoFrame); // Append the frame to the list
+    }
+
+    // Correctly assign the result and decoded status after the loop ends.
     decode_frame->decode_result = ret;
+    decode_frame->is_decoded = (frames.isEmpty()) ? false : true;
+    decode_frame->frames = new QList<AVFrame *>(frames); // Transfer ownership to DecodeFrame
 
-    if (ret < 0) {
-        qDebug() << "avcodec_receive_frame faild" << decode_frame->index;
-        av_frame_free(&videoFrame);
-        return;
-    }
-
-    decode_frame->frame = videoFrame;
-    decode_frame->is_decoded = true;
-
+    // The original frames list can be cleared now if not needed anymore
+    frames.clear();
 }
+
 
 void DecodeVideo::decodeLoop() {
     qDebug() << "===DecodeVideo::decodeLoop===开始==";
@@ -151,16 +164,16 @@ void DecodeVideo::decodeLoop() {
     double videoPts = 0.0;
     int64_t startTime = av_gettime();
     int position = 0;
-
     int finished_count = 0;
+    bool is_check_finished = false;
     DecodeState *state = DecodeState::getInstance();
 
-    bool is_check_finished = false;
 
     while (DecodeState::getInstance()->is_decoding) {
 
         if (state->video_frame_queue->size() == 0) {
             av_usleep(1000);
+            startTime = av_gettime();
             continue;
         }
         if (position == state->video_frame_queue->size()) {
@@ -175,7 +188,6 @@ void DecodeVideo::decodeLoop() {
             }
         }
 
-//        QMutexLocker locker(&decode_mutex);
 
         DecodeFrame *decode_frame = state->video_frame_queue->at(position);
 //        qDebug() << "===decode_frame->is_decoded===" << decode_frame->is_decoded;
@@ -195,8 +207,13 @@ void DecodeVideo::decodeLoop() {
             }
 
             this->decodeVideoFrame(decode_frame);
+
+        }
+
+        if (decode_frame->is_decoded) {
             finished_count++;
         }
+
         position++;
 
     }
@@ -219,10 +236,11 @@ void DecodeVideo::playLoop() {
 
         if (state->video_frame_queue->size() == 0 || state->video_frame_queue->size() <= position) {
             av_usleep(1000);
+            startTime += 1000;
             continue;
         }
 
-        QMutexLocker locker(&decode_mutex);
+        QReadLocker locker(&decode_mutex);
 
         DecodeFrame *decode_frame = state->video_frame_queue->at(position);
 
@@ -239,21 +257,25 @@ void DecodeVideo::playLoop() {
             av_usleep(diff / 2);
         } else if (diff < -100 * 1000) {
 //            qDebug() << "===diff==continue=" << diff;
-            position++;
-            continue;
+//            position++;
+//            continue;
         }
 
         if (!decode_frame->is_decoded) {
             av_usleep(1000);
+            startTime += 1000;
             continue;
         }
 
-        QImage newFrame = this->convertToQImage(decode_frame->frame, state->video_sws_ctx);
+        AVFrame *frame = decode_frame->frames->at(0);
+        QImage newFrame = this->convertToQImage(frame, state->video_sws_ctx);
         QPixmap pixmap = QPixmap::fromImage(newFrame);
         if (!pixmap.isNull()) {
             emit this->videoImageChanged(pixmap);
         }
         emit currentTimeChanged(videoPts);
+
+
         position++;
 
     }

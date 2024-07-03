@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QMutex>
 #include <QtCore/qqueue.h>
+#include <QReadWriteLock>
 #include "VideoDecoderThread.h"
 
 extern "C" {
@@ -65,7 +66,7 @@ private:
     VideoDecoderThread *videoDecoderThread = nullptr;
     VideoPlayThread *videoPlayThread = nullptr;
 
-    QMutex decode_mutex;
+    QReadWriteLock decode_mutex;
     QMutex start_or_pause_mutex;
 
     double duration;
