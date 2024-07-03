@@ -40,7 +40,6 @@ public:
 
     void readFrameLoop();
 
-    bool stop();
 
     void changeVolume(int volume);
 
@@ -50,7 +49,9 @@ public:
 
     void changeProgress(int targetTimeSeconds);
 
-    bool startOrPause();
+    void onStart(double time);
+    void onStop();
+    bool onPlayAndPause(bool pause);
 
     QSize videoSize;
 
@@ -58,16 +59,21 @@ public:
 
     ~VideoDecoder();
 
+    void startRead();
 
 signals:
     void videoImageChanged(QPixmap pixmap);
     void currentTimeChanged(double currentTime);
 
-    void start(bool pause);
+    void start(double time);
+    void stop();
+    void playAndPause(bool pause);
 
 private slots:
 
 private:
+
+
 
     DecodeVideo *decode_video;
     DecodeAudio *decode_audio;
@@ -77,6 +83,8 @@ private:
     AVFormatContext *fmt_ctx = nullptr;
 
     QMutex my_mutex;
+
+    QMutex progress_mutex;
 
     int64_t startTime = 0.0;
 
@@ -88,7 +96,6 @@ private:
     double m_duration;
     double  m_currentTime;
 
-    bool isRunning;
     bool isChangedProgress;
 
     QTimer *m_progressTimer;

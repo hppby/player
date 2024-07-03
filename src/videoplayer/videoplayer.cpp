@@ -27,14 +27,12 @@
 
 Videoplayer::Videoplayer(QWidget *parent) : QWidget(parent), m_voice(50) {
 
-    QImage img = QImage();
-
     this->setGeometry(100, 100, 1024, 600);
     this->setAttribute(Qt::WA_DeleteOnClose, true);
     this->setMouseTracking(true);
     isProgressMoving = false;
     m_isControlShowing = true;
-    m_headerHeight = 30;
+    is_playing = true;
     m_controlHeight = 80;
     m_timer = new QTimer(this);
 
@@ -182,8 +180,9 @@ void Videoplayer::InitControl() {
 
     // 设置暂停播放
     connect(m_playbutton, &QPushButton::clicked, [=]() {
-       bool isPlaying = video_decoder->startOrPause();
-       if (isPlaying) {
+        is_playing = !is_playing;
+         video_decoder->onPlayAndPause(is_playing);
+       if (is_playing) {
            ButtonStyleSet(m_playbutton, ":/resource/player-play.png");
        } else {
            ButtonStyleSet(m_playbutton, ":/resource/player-pause.png");
@@ -344,11 +343,11 @@ void Videoplayer::handleProgressChanged(int addProgress) {
     double totalTime = this->video_decoder->getDuration();
     if (progress > 0) {
         int64_t currentTime =(int64_t) totalTime * progress / fullWidth;
-//        if (currentTime + addProgress > 0) {
-//        this->video_decoder->changePlaybackProgress(currentTime + addProgress);
-//        } else {
-//            this->video_decoder->changePlaybackProgress(0);
-//        }
+        if (currentTime + addProgress > 0) {
+        this->video_decoder->changeProgress(currentTime + addProgress);
+        } else {
+            this->video_decoder->changeProgress(0);
+        }
     }
 }
 

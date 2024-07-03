@@ -8,6 +8,7 @@
 #include <QDebug>
 #include <QThreadPool>
 #include "AudioDecoderThread.h"
+#include "DecodeState.h"
 
 // 定义音频参数
 const int SAMPLE_RATE = 44100; // 采样率，常见值如 44100, 48000 等
@@ -16,9 +17,7 @@ const int CHANNELS = 2; // 声道数，1为单声道，2为立体声
 const int BUFFER_SIZE = 1024; // 缓冲区大小，单位为样本数
 
 DecodeAudio::DecodeAudio(AVFormatContext *fmtCtx) {
-    this->fmt_ctx = fmtCtx;
-    this->packet_queue = new QQueue<AVPacket *>();
-    this->is_playing = false;
+//    this->packet_queue = new QQueue<AVPacket *>();
 }
 
 bool DecodeAudio::init() {
@@ -28,23 +27,18 @@ bool DecodeAudio::init() {
         this->closeFile();
     }
 
-    ret = this->initSDL();
-    if (!ret) {
-        qDebug() << "初始化SDL--失败";
-        this->closeFile();
-    }
     return ret;
 }
 
 bool DecodeAudio::_init() {
 
     // 查找视频流
-    audio_stream_index = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    if (audio_stream_index < 0) {
+    DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index = av_find_best_stream(DecodeState::getInstance()->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index < 0) {
         qDebug() << "查找视频流--失败";
         return false;
     }
-    audio_stream = fmt_ctx->streams[audio_stream_index];
+    DecodeState::getInstance()->audio_stream = DecodeState::getInstance()->fmt_ctx->streams[DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index];
 
     // 初始化音频解码器
     if (!this->initAudioDecoder()) return false;
@@ -54,45 +48,45 @@ bool DecodeAudio::_init() {
 
 
 bool DecodeAudio::initAudioDecoder() {
-    const AVCodecParameters *codecpar = audio_stream->codecpar;
+    const AVCodecParameters *codecpar = DecodeState::getInstance()->audio_stream->codecpar;
     const AVCodec *codec = avcodec_find_decoder(codecpar->codec_id);
     if (!codec) {
         qDebug() << QString("查找解码器--失败 (流类型: %1)").arg("音频");
         return false;
     }
 
-    audio_dec_ctx = avcodec_alloc_context3(codec);
-    if (!(audio_dec_ctx)) {
+    DecodeState::getInstance()->audio_dec_ctx = avcodec_alloc_context3(codec);
+    if (!(DecodeState::getInstance()->audio_dec_ctx)) {
         qDebug() << QString("分配解码器上下文--失败 (流类型: %1)").arg("音频");
         return false;
     }
-    if (avcodec_parameters_to_context(audio_dec_ctx, codecpar) < 0) {
+    if (avcodec_parameters_to_context(DecodeState::getInstance()->audio_dec_ctx, codecpar) < 0) {
         qDebug() << QString("复制编解码参数到解码上下文--失败 (流类型: %1)").arg("音频");
         return false;
     }
-    if (avcodec_open2(audio_dec_ctx, codec, nullptr) < 0) {
+    if (avcodec_open2(DecodeState::getInstance()->audio_dec_ctx, codec, nullptr) < 0) {
         qDebug() << QString("打开解码器--失败 (流类型: %1)").arg("音频");
         return false;
     }
 
-    audio_swr_ctx = swr_alloc();
-    if (!audio_swr_ctx) {
+    DecodeState::getInstance()->audio_swr_ctx = swr_alloc();
+    if (!DecodeState::getInstance()->audio_swr_ctx) {
         qDebug() << "Could not allocate resampler context";
         return false;
     }
 
-    av_opt_set_int(audio_swr_ctx, "in_channel_layout",
-                   av_get_default_channel_layout(audio_dec_ctx->ch_layout.nb_channels), 0);
-    av_opt_set_int(audio_swr_ctx, "out_channel_layout",
-                   av_get_default_channel_layout(audio_dec_ctx->ch_layout.nb_channels), 0);
-    av_opt_set_int(audio_swr_ctx, "in_sample_rate", audio_dec_ctx->sample_rate, 0);
-    av_opt_set_int(audio_swr_ctx, "out_sample_rate", audio_dec_ctx->sample_rate, 0);
-    av_opt_set_sample_fmt(audio_swr_ctx, "in_sample_fmt", audio_dec_ctx->sample_fmt, 0);
-    av_opt_set_sample_fmt(audio_swr_ctx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+    av_opt_set_int(DecodeState::getInstance()->audio_swr_ctx, "in_channel_layout",
+                   av_get_default_channel_layout(DecodeState::getInstance()->audio_dec_ctx->ch_layout.nb_channels), 0);
+    av_opt_set_int(DecodeState::getInstance()->audio_swr_ctx, "out_channel_layout",
+                   av_get_default_channel_layout(DecodeState::getInstance()->audio_dec_ctx->ch_layout.nb_channels), 0);
+    av_opt_set_int(DecodeState::getInstance()->audio_swr_ctx, "in_sample_rate", DecodeState::getInstance()->audio_dec_ctx->sample_rate, 0);
+    av_opt_set_int(DecodeState::getInstance()->audio_swr_ctx, "out_sample_rate", DecodeState::getInstance()->audio_dec_ctx->sample_rate, 0);
+    av_opt_set_sample_fmt(DecodeState::getInstance()->audio_swr_ctx, "in_sample_fmt", DecodeState::getInstance()->audio_dec_ctx->sample_fmt, 0);
+    av_opt_set_sample_fmt(DecodeState::getInstance()->audio_swr_ctx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
 
-    if (swr_init(audio_swr_ctx) < 0) {
+    if (swr_init(DecodeState::getInstance()->audio_swr_ctx) < 0) {
         qDebug() << "Failed to initialize the resampler context";
-        swr_free(&audio_swr_ctx);
+        swr_free(&DecodeState::getInstance()->audio_swr_ctx);
         return false;
     }
 
@@ -115,7 +109,7 @@ void DecodeAudio::processAudioFrame(AVFrame *frame) {
     uint8_t *output_data = (uint8_t *) av_malloc(outBufferSize);
 
     // 转换音频数据
-    int ret = swr_convert(audio_swr_ctx,
+    int ret = swr_convert(DecodeState::getInstance()->audio_swr_ctx,
                           &output_data, frame->nb_samples,
                           (const uint8_t **) frame->data, frame->nb_samples); // 使用frame作为输入
 
@@ -134,22 +128,21 @@ void DecodeAudio::processAudioFrame(AVFrame *frame) {
 
 // 解码音频帧
 void DecodeAudio::decodeAudioFrame(AVPacket *pkt) {
-
+    if (!DecodeState::getInstance()->is_playing) return;
 
     AVFrame *audioFrame = av_frame_alloc();
-    int sendResult = avcodec_send_packet(audio_dec_ctx, pkt);
+    int sendResult = avcodec_send_packet(DecodeState::getInstance()->audio_dec_ctx, pkt);
     if (sendResult < 0) {
         qDebug() << "Error sending packet to decoder: " << av_err2str(sendResult);
+        av_frame_free(&audioFrame);
         return;
     }
 
-    while (sendResult >= 0 && this->is_playing) {
-        sendResult = avcodec_receive_frame(audio_dec_ctx, audioFrame);
-        if (sendResult == AVERROR(EAGAIN) || sendResult == AVERROR_EOF) {
-            qDebug() << "Error during decoding == 1: " << av_err2str(sendResult);
-            break;
-        } else if (sendResult < 0) {
+    if (DecodeState::getInstance()->is_playing) {
+        sendResult = avcodec_receive_frame(DecodeState::getInstance()->audio_dec_ctx, audioFrame);
+        if (sendResult < 0) {
             qDebug() << "Error during decoding == 2: " << av_err2str(sendResult);
+            av_frame_free(&audioFrame);
             return;
         }
 
@@ -161,30 +154,41 @@ void DecodeAudio::decodeAudioFrame(AVPacket *pkt) {
 
 void DecodeAudio::decodeLoop() {
 
-    qDebug() << "===DecodeAudio::decodeLoop===";
+    qDebug() << "===DecodeAudio::decodeLoop===开始==";
 
-    while (this->is_playing) {
+    int64_t startTime = av_gettime();
+    while (DecodeState::getInstance()->is_playing) {
 
-        if (this->packet_queue->empty()) {
+        if (DecodeState::getInstance()->audio_packet_queue->count() == 0) {
             av_usleep(1000);
             continue;
 
         }
-
-        AVPacket *pkt = this->packet_queue->dequeue();
+        AVPacket *pkt = DecodeState::getInstance()->audio_packet_queue->dequeue();
 
         if (pkt) {
+        // 计算当前时间
+        double audio_pts = av_q2d(DecodeState::getInstance()->fmt_ctx->streams[DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index]->time_base) * pkt->pts;
+
+        int64_t currentTime = audio_pts  * 1000 * 1000 + startTime;
+
+        int64_t diff = currentTime - av_gettime();
+
+        // 领先5秒歇一歇
+        if (diff > 5000 * 1000) {
+            av_usleep(diff / 2);
+        }
             this->decodeAudioFrame(pkt);
         }
-
         av_packet_free(&pkt);
     }
-
+    qDebug() << "===DecodeAudio::decodeLoop===结束==";
 }
 
 bool DecodeAudio::initSDL() {
     // 初始化SDL
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) { // 根据需要可以只初始化音频 SDL_INIT_AUDIO
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
+        // 根据需要可以只初始化音频 SDL_INIT_AUDIO
         qDebug() << "SDL could not initialize! SDL_Error: " << SDL_GetError();
         return false;
     }
@@ -195,7 +199,7 @@ bool DecodeAudio::initSDL() {
     }
     Mix_VolumeMusic(MIX_MAX_VOLUME);
 
-    const AVCodecParameters *codecpar = audio_stream->codecpar;
+    const AVCodecParameters *codecpar = DecodeState::getInstance()->audio_stream->codecpar;
 
 
     desired_spec.freq = codecpar->sample_rate;
@@ -223,14 +227,14 @@ void DecodeAudio::closeFile() {
 
     qDebug() << "===closeFile===";
 
-    if (fmt_ctx) {
-        avformat_close_input(&fmt_ctx);
-        fmt_ctx = nullptr;
+    if (DecodeState::getInstance()->fmt_ctx) {
+        avformat_close_input(&DecodeState::getInstance()->fmt_ctx);
+        DecodeState::getInstance()->fmt_ctx = nullptr;
     }
 
-    if (audio_dec_ctx) {
-        avcodec_free_context(&audio_dec_ctx);
-        audio_dec_ctx = nullptr;
+    if (DecodeState::getInstance()->audio_dec_ctx) {
+        avcodec_free_context(&DecodeState::getInstance()->audio_dec_ctx);
+        DecodeState::getInstance()->audio_dec_ctx = nullptr;
     }
 
     // 停止播放并清理
@@ -241,9 +245,9 @@ void DecodeAudio::closeFile() {
 }
 
 
-bool DecodeAudio::startOrPause(bool pause) {
-    this->is_playing = pause;
-    if (this->is_playing) {
+bool DecodeAudio::playAndPause(bool pause) {
+    DecodeState::getInstance()->is_playing = pause;
+    if (DecodeState::getInstance()->is_playing) {
         SDL_PauseAudioDevice(audio_device_id, 0);
         audioDecoderThread = new AudioDecoderThread(this);
         QThreadPool::globalInstance()->start(audioDecoderThread);
@@ -252,7 +256,7 @@ bool DecodeAudio::startOrPause(bool pause) {
         audioDecoderThread = nullptr;
     }
 
-    return this->is_playing;
+    return DecodeState::getInstance()->is_playing;
 }
 
 
@@ -260,21 +264,21 @@ DecodeAudio::~DecodeAudio() {
     this->closeFile();
 }
 
-void DecodeAudio::addPacket(AVPacket *pkt) {
-    AVPacket *pkt1 = av_packet_alloc();
-    if (!pkt1) {
-        av_packet_unref(pkt1);
-    }
-    av_packet_move_ref(pkt1, pkt);
 
-    my_mutex.lock();
-    this->packet_queue->enqueue(pkt1);
-    my_mutex.unlock();
+
+void DecodeAudio::stop() {
+    SDL_PauseAudioDevice(audio_device_id, 1);
+    audioDecoderThread = nullptr;
+//    avcodec_flush_buffers(DecodeState::getInstance()->audio_dec_ctx);
+//    DecodeState::getInstance()->audio_packet_queue->clear();
 }
 
-void DecodeAudio::resetPacketQueue() {
-    my_mutex.lock();
-    this->packet_queue->clear();
-
-    my_mutex.unlock();
+bool DecodeAudio::start(double time) {
+    bool ret = this->initSDL();
+    if (!ret) {
+        qDebug() << "初始化SDL--失败";
+        this->closeFile();
+    }
+    this->playAndPause(true);
+    return ret;
 }

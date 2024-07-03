@@ -35,24 +35,26 @@ public:
 
 
 
-    AVFormatContext *fmt_ctx = nullptr;
-    AVCodecContext *audio_dec_ctx = nullptr;
-    int audio_stream_index = -1;
-    bool is_playing = false;
-    AVStream *audio_stream = nullptr;
-    SwrContext *audio_swr_ctx = nullptr;
+//    AVFormatContext *fmt_ctx = nullptr;
+//    AVCodecContext *audio_dec_ctx = nullptr;
+//    int audio_stream_index = -1;
+//    bool is_playing = false;
+//    AVStream *audio_stream = nullptr;
+//    SwrContext *audio_swr_ctx = nullptr;
 
     bool init();
-    bool startOrPause(bool pause);
+    bool start(double time);
+    bool playAndPause(bool pause);
+    void stop();
     void decodeLoop();
 
-    void addPacket(AVPacket *pkt);
     void decodeAudioFrame(AVPacket *pkt);
+
+
 private:
 
     AudioDecoderThread *audioDecoderThread = nullptr;
 
-    QQueue<AVPacket *> *packet_queue;
 
 
     // 音频设备
@@ -61,6 +63,7 @@ private:
     SDL_AudioSpec desired_spec;
 
     QMutex my_mutex;
+    QMutex decode_mutex;
 
     bool _init();
     bool initAudioDecoder();
@@ -69,7 +72,7 @@ private:
     void processAudioFrame(AVFrame *frame);
 
     void closeFile();
-    void resetPacketQueue();
+
 };
 
 

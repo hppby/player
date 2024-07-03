@@ -91,7 +91,7 @@ private:
     int m_progress;
     bool m_isControlShowing;
 
-    int m_headerHeight;
+    bool is_playing;
     int m_controlHeight;
 
 

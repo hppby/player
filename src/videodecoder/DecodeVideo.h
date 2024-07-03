@@ -26,6 +26,9 @@ extern "C" {
 }
 
 class VideoDecoder;
+class VideoPlayThread;
+class DecodeFrame;
+
 
 class DecodeVideo : public QObject {
 Q_OBJECT
@@ -36,37 +39,44 @@ public:
     ~DecodeVideo();
 
 
-    AVFormatContext *fmt_ctx = nullptr;
-    AVStream *video_stream = nullptr;
-    AVCodecContext *video_dec_ctx = nullptr;
-    SwsContext *video_sws_ctx = nullptr;
-    int video_stream_index = -1;
-    bool is_playing = false;
+//    AVFormatContext *fmt_ctx = nullptr;
+//    AVStream *video_stream = nullptr;
+//    AVCodecContext *video_dec_ctx = nullptr;
+//    SwsContext *video_sws_ctx = nullptr;
+//    int video_stream_index = -1;
+//    bool is_playing = false;
 
-    bool startOrPause(bool pause);
+    void start(double time);
+    void playAndPause(bool pause);
+    void stop();
     bool init();
     void decodeLoop();
+    void playLoop();
 
-    void addPacket(AVPacket *pkt);
+    void decodeVideoFrame(DecodeFrame *frame);
 
+    void startDecode();
+    void stopDecode();
 private:
+
+    QMutex codec_mutex;
 
     VideoDecoder *video_decoder;
     VideoDecoderThread *videoDecoderThread = nullptr;
-    QQueue<AVPacket *> *packet_queue;
+    VideoPlayThread *videoPlayThread = nullptr;
 
-    QMutex my_mutex;
+    QMutex decode_mutex;
     QMutex start_or_pause_mutex;
 
     double duration;
-    double skip_duration;
+
 
     bool _init();
     bool initVideoDecoder();
 
     QImage convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx);
 
-    void decodeVideoFrame(AVPacket *pkt);
+
 
     void closeFile();
 
@@ -75,6 +85,8 @@ private:
 signals:
     void videoImageChanged(QPixmap pixmap);
     void currentTimeChanged(double currentTime);
+
+
 };
 
 
