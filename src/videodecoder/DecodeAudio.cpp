@@ -10,7 +10,6 @@
 #include "AudioDecoderThread.h"
 #include "DecodeState.h"
 #include "AudioPlayThread.h"
-#include "DecodeFrame.h"
 
 // 定义音频参数
 const int SAMPLE_RATE = 44100; // 采样率，常见值如 44100, 48000 等
@@ -35,13 +34,13 @@ bool DecodeAudio::init() {
 bool DecodeAudio::_init() {
 
     // 查找视频流
-    DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index = av_find_best_stream(
+    DecodeState::getInstance()->audio_stream_index = av_find_best_stream(
             DecodeState::getInstance()->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-    if (DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index < 0) {
+    if (DecodeState::getInstance()->audio_stream_index < 0) {
         qDebug() << "查找视频流--失败";
         return false;
     }
-    DecodeState::getInstance()->audio_stream = DecodeState::getInstance()->fmt_ctx->streams[DecodeState::getInstance()->DecodeState::getInstance()->audio_stream_index];
+    DecodeState::getInstance()->audio_stream = DecodeState::getInstance()->fmt_ctx->streams[DecodeState::getInstance()->audio_stream_index];
 
     // 初始化音频解码器
     if (!this->initAudioDecoder()) return false;
@@ -133,87 +132,67 @@ void DecodeAudio::processAudioFrame(AVFrame *frame) {
 }
 
 // 解码音频帧
-void DecodeAudio::decodeAudioFrame(DecodeFrame *decode_frame) {
-    if (!DecodeState::getInstance()->is_playing) return;
+void DecodeAudio::decodeAudioFrame(AVPacket *pkt) {
+    if (!DecodeState::getInstance()->is_playing) {
+        av_packet_unref(pkt);
+        av_packet_free(&pkt);
+        return;
+    };
 
-
-    int sendResult = avcodec_send_packet(DecodeState::getInstance()->audio_dec_ctx, decode_frame->pkt);
+    int sendResult = avcodec_send_packet(DecodeState::getInstance()->audio_dec_ctx, pkt);
+    av_packet_free(&pkt);
     if (sendResult < 0) {
         qDebug() << "Error sending packet to decoder: " << av_err2str(sendResult);
         return;
     }
 
-
-    QList<AVFrame *> *frames = new QList<AVFrame *>();
     while (true) {
         AVFrame *audioFrame = av_frame_alloc();
         int receiveResult = avcodec_receive_frame(DecodeState::getInstance()->audio_dec_ctx, audioFrame);
-        if (receiveResult < 0) {
+
+        if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
+            av_frame_free(&audioFrame);
+            break;
+        } else if (receiveResult < 0) {
             qDebug() << "Error during decoding == 2: " << av_err2str(receiveResult);
             av_frame_free(&audioFrame);
             break;
+        } else {
+            DecodeState::getInstance()->addAudioFrame(audioFrame);
         }
-        frames->append(audioFrame);
     }
-
-    decode_frame->frames = frames;
-    decode_frame->is_decoded = true;
+    qDebug() << "===解码结束==2=";
 }
 
 
 void DecodeAudio::decodeLoop() {
 
     qDebug() << "===DecodeAudio::decodeLoop===开始==";
-    avcodec_flush_buffers(DecodeState::getInstance()->audio_dec_ctx);
 
     int64_t startTime = av_gettime();
-    int position = 0;
-    int finished_count = 0;
-    bool is_check_finished = false;
     DecodeState *state = DecodeState::getInstance();
 
     while (state->is_decoding) {
 
-        if (state->audio_frame_queue->count() == 0) {
-            av_usleep(1000);
-            startTime = av_gettime();
-            continue;
-        }
+        AVPacket *pkt = state->getAudioPacket();
 
-        if (position == state->video_frame_queue->size()) {
-            if (finished_count < position) {
-                avcodec_flush_buffers(DecodeState::getInstance()->audio_dec_ctx);
-                finished_count = 0;
-                position = 0;
-                is_check_finished = true;
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        DecodeFrame *decode_frame = state->audio_frame_queue->at(position);
-        if (decode_frame && !decode_frame->is_decoded) {
-
+        if (pkt) {
             // 计算当前时间
             double audio_pts =
-                    av_q2d(state->fmt_ctx->streams[state->audio_stream_index]->time_base) * decode_frame->pts;
+                    av_q2d(state->fmt_ctx->streams[state->audio_stream_index]->time_base) * pkt->pts;
 
             int64_t currentTime = audio_pts * 1000 * 1000 + startTime;
 
             int64_t diff = currentTime - av_gettime();
 
-            if (diff < 0 && !is_check_finished) {
-                position++;
+            if (diff < 0) {
                 continue;
             }
-            this->decodeAudioFrame(decode_frame);
-        }
-        if (decode_frame->is_decoded) {
-            finished_count++;
+            this->decodeAudioFrame(pkt);
+        } else {
+            av_usleep(1000);
         }
 
-        position++;
     }
 
     qDebug() << "===DecodeAudio::decodeLoop===结束==";
@@ -226,50 +205,31 @@ void DecodeAudio::playLoop() {
 
     int64_t startTime = av_gettime();
 
-    int position = 0;
-
     DecodeState *state = DecodeState::getInstance();
 
     while (state->is_playing) {
 
-        if (state->audio_frame_queue->size() == 0 || state->audio_frame_queue->size() <= position) {
-            av_usleep(1000);
-            startTime = av_gettime();
-            continue;
-        }
 
-//        QMutexLocker locker(&decode_mutex);
+        AVFrame *frame = state->getAudioFrame();
+        if (frame) {
+            // 计算当前时间
+            audioPts = av_q2d(state->fmt_ctx->streams[state->audio_stream_index]->time_base) * frame->pts;
 
-        DecodeFrame *decode_frame = state->audio_frame_queue->at(position);
+            int64_t currentTime = (audioPts - state->start_time) * 1000 * 1000 + startTime;
+            duration = audioPts;
+            int64_t diff = currentTime - av_gettime();
 
-        // 计算当前时间
-        audioPts = av_q2d(state->fmt_ctx->streams[state->video_stream_index]->time_base) * decode_frame->pts;
+            if (diff < -10 * 1000) {
+                qDebug() << "===diff==continue=" << diff;
+                av_frame_free(&frame);
+                continue;
+            }
 
-        int64_t currentTime = (audioPts - state->skip_duration) * 1000 * 1000 + startTime;
-        duration = audioPts;
-        int64_t endTime2 = av_gettime();
-        int64_t diff = currentTime - av_gettime();
-
-
-        if (diff > 100 * 1000) {
-//            av_usleep(diff / 2);
-        } else if (diff < -100 * 1000) {
-//            qDebug() << "===diff==continue=" << diff;
-            position++;
-            continue;
-        }
-
-        if (!decode_frame->is_decoded) {
-            av_usleep(1000);
-            continue;
-        }
-
-        for (auto frame : *decode_frame->frames) {
             this->processAudioFrame(frame);
+            av_frame_free(&frame);
+        } else {
+            av_usleep(100);
         }
-
-        position++;
-
     }
     qDebug() << "===DecodeAudio::decodeLoop===结束==";
 }
@@ -358,18 +318,16 @@ DecodeAudio::~DecodeAudio() {
 void DecodeAudio::stop() {
     SDL_PauseAudioDevice(audio_device_id, 1);
     audioDecoderThread = nullptr;
-//    avcodec_flush_buffers(DecodeState::getInstance()->audio_dec_ctx);
-//    DecodeState::getInstance()->audio_packet_queue->clear();
 }
 
-bool DecodeAudio::start(double time) {
+void DecodeAudio::start() {
     bool ret = this->initSDL();
     if (!ret) {
         qDebug() << "初始化SDL--失败";
         this->closeFile();
+        return;
     }
     this->playAndPause(true);
-    return ret;
 }
 
 void DecodeAudio::startDecode() {

@@ -49,7 +49,7 @@ public:
 
     void changeProgress(int targetTimeSeconds);
 
-    void onStart(double time);
+    void onStart();
     void onStop();
     bool onPlayAndPause(bool pause);
 
@@ -65,7 +65,7 @@ signals:
     void videoImageChanged(QPixmap pixmap);
     void currentTimeChanged(double currentTime);
 
-    void start(double time);
+    void start();
     void stop();
     void playAndPause(bool pause);
 

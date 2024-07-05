@@ -6,7 +6,6 @@
 #include "VideoDecoder.h"
 #include <QDebug>
 #include "DecodeState.h"
-#include "DecodeFrame.h"
 #include "VideoPlayThread.h"
 
 
@@ -110,32 +109,31 @@ QImage DecodeVideo::convertToQImage(AVFrame *src_frame, SwsContext *sws_ctx) {
     return dest;
 }
 
-void DecodeVideo::decodeVideoFrame(DecodeFrame *decode_frame) {
+void DecodeVideo::decodeVideoFrame(AVPacket *pkt) {
     DecodeState *state = DecodeState::getInstance();
     if (!state || !state->is_decoding) {
         return;
     }
-    QWriteLocker locker(&decode_mutex);
 
-    int ret = avcodec_send_packet(state->video_dec_ctx, decode_frame->pkt);
+    QWriteLocker locker(&decode_mutex);
+    int ret = avcodec_send_packet(state->video_dec_ctx, pkt);
     if (ret < 0) {
         qDebug() << "avcodec_send_packet failed with error code: " << ret;
         return;
     }
 
-    // Initialize frame list outside the loop to avoid re-creation on each iteration.
-    QList<AVFrame *> frames;
-
     while (true) {
         AVFrame *videoFrame = av_frame_alloc();
         if (!videoFrame) {
             qDebug() << "Failed to allocate memory for AVFrame";
-            break; // Exit loop if frame allocation fails
+            return; // Exit loop if frame allocation fails
         }
+
+        av_frame_unref(videoFrame);
 
         int receiveResult = avcodec_receive_frame(state->video_dec_ctx, videoFrame);
         if (receiveResult == AVERROR(EAGAIN) || receiveResult == AVERROR_EOF) {
-            // No frame available, or end of stream reached
+            qDebug() << "===结束获取数据===";
             av_frame_free(&videoFrame);
             break;
         } else if (receiveResult < 0) {
@@ -144,78 +142,43 @@ void DecodeVideo::decodeVideoFrame(DecodeFrame *decode_frame) {
             break;
         }
 
-        frames.append(videoFrame); // Append the frame to the list
+        DecodeState::getInstance()->addVideoFrame(videoFrame);
     }
 
-    // Correctly assign the result and decoded status after the loop ends.
-    decode_frame->decode_result = ret;
-    decode_frame->is_decoded = (frames.isEmpty()) ? false : true;
-    decode_frame->frames = new QList<AVFrame *>(frames); // Transfer ownership to DecodeFrame
-
-    // The original frames list can be cleared now if not needed anymore
-    frames.clear();
+qDebug() << "===解码结束==1=";
 }
 
 
 void DecodeVideo::decodeLoop() {
     qDebug() << "===DecodeVideo::decodeLoop===开始==";
-    avcodec_flush_buffers(DecodeState::getInstance()->video_dec_ctx);
-
     double videoPts = 0.0;
     int64_t startTime = av_gettime();
-    int position = 0;
-    int finished_count = 0;
-    bool is_check_finished = false;
-    DecodeState *state = DecodeState::getInstance();
 
+
+    DecodeState *state = DecodeState::getInstance();
 
     while (DecodeState::getInstance()->is_decoding) {
 
-        if (state->video_frame_queue->size() == 0) {
-            av_usleep(1000);
-            startTime = av_gettime();
-            continue;
-        }
-        if (position == state->video_frame_queue->size()) {
-            if (finished_count < position) {
-                avcodec_flush_buffers(DecodeState::getInstance()->video_dec_ctx);
-                finished_count = 0;
-                position = 0;
-                is_check_finished = true;
-                continue;
-            } else {
-                break;
-            }
-        }
 
-
-        DecodeFrame *decode_frame = state->video_frame_queue->at(position);
-//        qDebug() << "===decode_frame->is_decoded===" << decode_frame->is_decoded;
-        if (decode_frame && !decode_frame->is_decoded) {
-
+        AVPacket *packet = state->getVideoPacket();
+        if (packet) {
             // 计算当前时间
-            videoPts = av_q2d(state->fmt_ctx->streams[state->video_stream_index]->time_base) * decode_frame->pts;
+            videoPts = av_q2d(state->fmt_ctx->streams[state->video_stream_index]->time_base) * packet->pts;
 
-            int64_t currentTime = (videoPts - state->skip_duration) * 1000 * 1000 + startTime;
+            int64_t currentTime = (videoPts - state->start_time) * 1000 * 1000 + startTime;
             duration = videoPts;
 
             int64_t diff = currentTime - av_gettime();
 
-            if (diff < 0 && !is_check_finished) {
-                position++;
+            if (diff < 0) {
+                av_packet_free(&packet);
                 continue;
             }
-
-            this->decodeVideoFrame(decode_frame);
-
+            this->decodeVideoFrame(packet);
+            av_packet_free(&packet);
+        } else {
+            av_usleep(1000);
         }
-
-        if (decode_frame->is_decoded) {
-            finished_count++;
-        }
-
-        position++;
-
     }
     qDebug() << "===DecodeVideo::decodeLoop===结束==";
 }
@@ -227,57 +190,43 @@ void DecodeVideo::playLoop() {
 
     int64_t startTime = av_gettime();
 
-    int position = 0;
-
+    DecodeState *state = DecodeState::getInstance();
     while (DecodeState::getInstance()->is_playing) {
 
-        DecodeState *state = DecodeState::getInstance();
+
+        AVFrame *frame = state->getVideoFrame();
+
+        if (frame) {
 
 
-        if (state->video_frame_queue->size() == 0 || state->video_frame_queue->size() <= position) {
+            // 计算当前时间
+            videoPts = av_q2d(state->fmt_ctx->streams[state->video_stream_index]->time_base) * frame->pts;
+
+            int64_t currentTime = (videoPts - state->start_time) * 1000 * 1000 + startTime;
+            duration = videoPts;
+            int64_t diff = currentTime - av_gettime();
+
+            if (diff > 100 * 1000) {
+                qDebug() << "===diff===" << diff;
+                av_usleep(diff / 2);
+            } else if (diff < -100 * 1000) {
+                qDebug() << "===diff===" << diff;
+                if (frame) {
+                    av_frame_free(&frame);
+                }
+                continue;
+            }
+
+            QImage newFrame = this->convertToQImage(frame, state->video_sws_ctx);
+            QPixmap pixmap = QPixmap::fromImage(newFrame);
+            if (!pixmap.isNull()) {
+                emit this->videoImageChanged(pixmap);
+            }
+            emit currentTimeChanged(state->start_time > videoPts ? state->start_time : videoPts);
+            av_frame_free(&frame);
+        } else {
             av_usleep(1000);
-            startTime += 1000;
-            continue;
         }
-
-        QReadLocker locker(&decode_mutex);
-
-        DecodeFrame *decode_frame = state->video_frame_queue->at(position);
-
-        // 计算当前时间
-        videoPts = av_q2d(state->fmt_ctx->streams[state->video_stream_index]->time_base) * decode_frame->pts;
-
-        int64_t currentTime = (videoPts - state->skip_duration) * 1000 * 1000 + startTime;
-        duration = videoPts;
-        int64_t endTime2 = av_gettime();
-        int64_t diff = currentTime - av_gettime();
-
-
-        if (diff > 100 * 1000) {
-            av_usleep(diff / 2);
-        } else if (diff < -100 * 1000) {
-//            qDebug() << "===diff==continue=" << diff;
-//            position++;
-//            continue;
-        }
-
-        if (!decode_frame->is_decoded) {
-            av_usleep(1000);
-            startTime += 1000;
-            continue;
-        }
-
-        AVFrame *frame = decode_frame->frames->at(0);
-        QImage newFrame = this->convertToQImage(frame, state->video_sws_ctx);
-        QPixmap pixmap = QPixmap::fromImage(newFrame);
-        if (!pixmap.isNull()) {
-            emit this->videoImageChanged(pixmap);
-        }
-        emit currentTimeChanged(videoPts);
-
-
-        position++;
-
     }
     qDebug() << "===DecodeVideo::decodeLoop===结束==";
 }
@@ -307,7 +256,7 @@ void DecodeVideo::playAndPause(bool pause) {
         videoPlayThread = new VideoPlayThread(this);
         QThreadPool::globalInstance()->start(videoPlayThread);
     } else {
-        DecodeState::getInstance()->skip_duration = duration;
+        DecodeState::getInstance()->start_time = duration;
         videoPlayThread = nullptr;
     }
 }
@@ -317,20 +266,12 @@ DecodeVideo::~DecodeVideo() {
 }
 
 void DecodeVideo::stop() {
-    DecodeState::getInstance()->skip_duration = 0.0;
+    DecodeState::getInstance()->start_time = 0.0;
     videoDecoderThread = nullptr;
-    // 重置解码器
-    qDebug() << "===重置解码器===";
-//    DecodeState::getInstance()->video_packet_queue->clear();
-//    avcodec_flush_buffers(DecodeState::getInstance()->video_dec_ctx);
-    qDebug() << "===重置解码器==2=";
 }
 
-void DecodeVideo::start(double time) {
-
-    DecodeState::getInstance()->skip_duration = time ? time : 0.0;
+void DecodeVideo::start() {
     this->playAndPause(true);
-
 }
 
 void DecodeVideo::startDecode() {

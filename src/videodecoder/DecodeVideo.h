@@ -28,7 +28,6 @@ extern "C" {
 
 class VideoDecoder;
 class VideoPlayThread;
-class DecodeFrame;
 
 
 class DecodeVideo : public QObject {
@@ -47,14 +46,14 @@ public:
 //    int video_stream_index = -1;
 //    bool is_playing = false;
 
-    void start(double time);
+    void start();
     void playAndPause(bool pause);
     void stop();
     bool init();
     void decodeLoop();
     void playLoop();
 
-    void decodeVideoFrame(DecodeFrame *frame);
+    void decodeVideoFrame(AVPacket *pkt);
 
     void startDecode();
     void stopDecode();

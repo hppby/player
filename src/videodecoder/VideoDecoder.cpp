@@ -33,7 +33,6 @@ bool VideoDecoder::openFile(QString fileName) {
 
     this->initDecode(fileName);
 
-    this->onStart(0);
 
     isChangedWindowSize = false;
     return true;
@@ -96,7 +95,7 @@ bool VideoDecoder::initDecode(QString fileName) {
 
     this->m_duration = (double) fmt_ctx->duration / AV_TIME_BASE;
 
-
+    this->onStart();
     return true;
 }
 
@@ -104,13 +103,35 @@ void VideoDecoder::readFrameLoop() {
 
     qDebug() << "===VideoDecoder::readFrameLoop== 开始 =";
     DecodeState *state = DecodeState::getInstance();
+    DecodeState::getInstance()->clearQueue();
+    avcodec_flush_buffers(DecodeState::getInstance()->video_dec_ctx);
+    avcodec_flush_buffers(DecodeState::getInstance()->audio_dec_ctx);
+    AVPacket *pkt = av_packet_alloc();
+    if (pkt) {
+        av_packet_unref(pkt);
+    } else {
+        qDebug() << "===初始化 pkt 失败===";
+        return;
+    }
+
     while (state->is_playing) {
-        AVPacket *pkt = av_packet_alloc();
-        if (pkt) {
-            av_packet_unref(pkt);
-        } else {
-            continue;
+        if (state->is_seeking) {
+            int64_t seek_target = (int) state->start_time * 1000 * 1000;
+            qDebug() << "===seek_target===" << seek_target;
+            int index = av_find_default_stream_index(fmt_ctx);
+
+            // 寻找最近的关键帧
+            int video_seek_result = avformat_seek_file(fmt_ctx, -1,
+                                                       INT64_MIN, seek_target,
+                                                       INT64_MAX, 0); // 寻找最近的关键帧
+            if (video_seek_result < 0) {
+                qDebug() << "Error video_seek_result frame: " << av_err2str(video_seek_result);
+                break;
+            }
+
+            state->is_seeking = false;
         }
+
         int ret = av_read_frame(fmt_ctx, pkt);
         if (ret < 0) {
             if (ret == AVERROR_EOF) {
@@ -118,9 +139,10 @@ void VideoDecoder::readFrameLoop() {
             } else {
                 qDebug() << "===av_read_frame === 其他错误 == " << ret;
             }
-            av_packet_free(&pkt);
+            av_packet_unref(pkt);
             break;
         };
+
 
         if (pkt->stream_index == state->video_stream_index) {
             state->addVideoPacket(pkt);
@@ -130,6 +152,7 @@ void VideoDecoder::readFrameLoop() {
 
         }
 
+        av_packet_unref(pkt);
     }
     qDebug() << "===VideoDecoder::readFrameLoop== 结束 =";
 
@@ -155,29 +178,20 @@ double VideoDecoder::getDuration() {
     return this->m_duration;
 }
 
-void VideoDecoder::changeProgress(int targetTimeSeconds1) {
+void VideoDecoder::changeProgress(int targetTimeSeconds) {
 
-qDebug() << "===暂停解码===";
+
+    qDebug() << "===暂停解码===";
     this->onStop();
-    av_usleep(100000);
-    int64_t targetTimeSeconds = targetTimeSeconds1 * 1000;
-    qDebug() << "===target_time_seconds===" << targetTimeSeconds;
+    av_usleep(10000);
+    DecodeState::getInstance()->start_time = targetTimeSeconds;
+    DecodeState::getInstance()->is_seeking = true;
 
 
+    qDebug() << "===重新开始了===";
+    this->onStart();
 
-    // 寻找最近的关键帧
-    int video_seek_result = avformat_seek_file(fmt_ctx, DecodeState::getInstance()->video_stream_index,
-                                               targetTimeSeconds - 2, targetTimeSeconds,
-                                               targetTimeSeconds + 2, AVSEEK_FLAG_BACKWARD); // 寻找最近的关键帧
-    if (video_seek_result < 0) {
-        qDebug() << "Error video_seek_result frame: " << av_err2str(video_seek_result);
-    }
-
-
-    av_usleep(1000);
-    qDebug() << "===重新开始了===" ;
-    this->onStart(targetTimeSeconds1 * 1.0);
-
+    this->startRead();
 }
 
 
@@ -197,15 +211,13 @@ bool VideoDecoder::onPlayAndPause(bool pause) {
 
 }
 
-void VideoDecoder::onStart(double time) {
+void VideoDecoder::onStart() {
     DecodeState::getInstance()->is_playing = true;
-    DecodeState::getInstance()->skip_duration = time;
 
     decode_video->startDecode();
     decode_audio->startDecode();
-    emit start(time);
+    emit start();
 }
-
 
 
 void VideoDecoder::startRead() {
@@ -213,10 +225,11 @@ void VideoDecoder::startRead() {
     QThreadPool::globalInstance()->start(readFrameThread);
 }
 
- void VideoDecoder::onStop() {
-     decode_video->stopDecode();
-     decode_audio->stopDecode();
+void VideoDecoder::onStop() {
     DecodeState::getInstance()->is_playing = false;
+    DecodeState::getInstance()->is_decoding = false;
+//     decode_video->stopDecode();
+//     decode_audio->stopDecode();
     emit stop();
 }
 

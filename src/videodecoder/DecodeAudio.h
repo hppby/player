@@ -25,7 +25,6 @@ extern "C" {
 }
 
 class AudioDecoderThread;
-class DecodeFrame;
 class AudioPlayThread;
 
 class DecodeAudio : public QObject {
@@ -36,22 +35,14 @@ public:
     ~DecodeAudio();
 
 
-
-//    AVFormatContext *fmt_ctx = nullptr;
-//    AVCodecContext *audio_dec_ctx = nullptr;
-//    int audio_stream_index = -1;
-//    bool is_playing = false;
-//    AVStream *audio_stream = nullptr;
-//    SwrContext *audio_swr_ctx = nullptr;
-
     bool init();
-    bool start(double time);
+    void start();
     bool playAndPause(bool pause);
     void stop();
     void decodeLoop();
     void playLoop();
 
-    void decodeAudioFrame(DecodeFrame *decode_frame);
+    void decodeAudioFrame(AVPacket *pkt);
 
 
     void startDecode();

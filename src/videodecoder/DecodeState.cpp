@@ -6,7 +6,6 @@
 #include <QCoreApplication>
 #include "DecodeState.h"
 #include <QtCore/qqueue.h>
-#include "DecodeFrame.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -36,40 +35,73 @@ DecodeState *DecodeState::getInstance() {
 // 构造函数定义，可以在这里进行初始化操作
 DecodeState::DecodeState() {
 
+    this->audio_packet_queue = new QQueue<AVPacket *>();
+    this->video_packet_queue = new QQueue<AVPacket *>();
 
-    this->video_frame_queue = new QList<DecodeFrame *>();
-    this->audio_frame_queue = new QList<DecodeFrame *>();
+    this->video_frame_queue = new QQueue<AVFrame *>();
+    this->audio_frame_queue = new QQueue<AVFrame *>();
 
-    this->skip_duration = 0.0;
 }
 
 void DecodeState::addVideoPacket(AVPacket *pkt) {
-//    QMutexLocker locker(&video_packet_queue_mutex);
-    DecodeFrame *frame = new DecodeFrame(pkt);
-    frame->index = DecodeState::getInstance()->video_frame_queue->size();
-    DecodeState::getInstance()->video_frame_queue->append(frame);
+    AVPacket *pkt1 = av_packet_alloc();
+    if (!pkt1) {
+        av_packet_unref(pkt);
+        return;
+    }
+    av_packet_move_ref(pkt1, pkt);
+    QMutexLocker locker(&video_packet_queue_mutex);
+    DecodeState::getInstance()->video_packet_queue->enqueue(pkt1);
 
 }
 
 void DecodeState::addAudioPacket(AVPacket *pkt) {
-
-    DecodeFrame *frame = new DecodeFrame(pkt);
-    frame->index = DecodeState::getInstance()->audio_frame_queue->size();
-    DecodeState::getInstance()->audio_frame_queue->append(frame);
+    AVPacket *pkt1 = av_packet_alloc();
+    if (!pkt1) {
+        av_packet_unref(pkt);
+        return;
+    }
+    av_packet_move_ref(pkt1, pkt);
+    QMutexLocker locker(&audio_packet_queue_mutex);
+    DecodeState::getInstance()->audio_packet_queue->enqueue(pkt1);
 
 }
 void DecodeState::addVideoFrame(AVFrame *frame) {
-    if (!DecodeState::getInstance()->is_playing) return;
-
-    QMutexLocker locker(&video_packet_queue_mutex);
-//    DecodeState::getInstance()->video_frame_queue->append(frame);
+    if (!DecodeState::getInstance()->is_decoding) return;
+    QMutexLocker locker(&video_frame_queue_mutex);
+    DecodeState::getInstance()->video_frame_queue->enqueue(frame);
 }
 
 void DecodeState::addAudioFrame(AVFrame *frame) {
-    if (!DecodeState::getInstance()->is_playing) return;
+    QMutexLocker locker(&audio_frame_queue_mutex);
+    DecodeState::getInstance()->audio_frame_queue->enqueue(frame);
+}
 
+void DecodeState::clearQueue() {
+    DecodeState::getInstance()->audio_frame_queue->clear();
+    DecodeState::getInstance()->video_frame_queue->clear();
+    DecodeState::getInstance()->audio_packet_queue->clear();
+    DecodeState::getInstance()->video_packet_queue->clear();
+}
+
+AVPacket *DecodeState::getVideoPacket() {
+    QMutexLocker locker(&video_packet_queue_mutex);
+    return DecodeState::getInstance()->video_packet_queue->isEmpty() ? nullptr :  DecodeState::getInstance()->video_packet_queue->dequeue();
+}
+
+AVPacket *DecodeState::getAudioPacket() {
     QMutexLocker locker(&audio_packet_queue_mutex);
-//    DecodeState::getInstance()->audio_frame_queue->append(frame);
+    return DecodeState::getInstance()->audio_packet_queue->isEmpty() ? nullptr : DecodeState::getInstance()->audio_packet_queue->dequeue();
+}
+
+AVFrame *DecodeState::getVideoFrame() {
+    QMutexLocker locker(&video_frame_queue_mutex);
+    return DecodeState::getInstance()->video_frame_queue->isEmpty() ? nullptr : DecodeState::getInstance()->video_frame_queue->dequeue();
+}
+
+AVFrame *DecodeState::getAudioFrame() {
+    QMutexLocker locker(&audio_frame_queue_mutex);
+    return DecodeState::getInstance()->audio_frame_queue->isEmpty() ? nullptr : DecodeState::getInstance()->audio_frame_queue->dequeue();
 }
 
 
