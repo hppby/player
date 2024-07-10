@@ -52,6 +52,16 @@ set(PROJECT_SOURCES
         src/videodecoder/VideoPlayThread.h
         src/videodecoder/AudioPlayThread.cpp
         src/videodecoder/AudioPlayThread.h
+        src/media/VideoPage.cpp
+        src/media/VideoPage.h
+        src/db/SqlVideo.cpp
+        src/db/SqlVideo.h
+        src/db/Movie.cpp
+        src/db/Movie.h
+        src/network/HttpClient.cpp
+        src/network/HttpClient.h
+        src/download/HandleMagnet.cpp
+        src/download/HandleMagnet.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
@@ -140,6 +150,21 @@ target_link_libraries(
 
 find_package(SDL2_mixer CONFIG REQUIRED)
 target_link_libraries(player PRIVATE $<IF:$<TARGET_EXISTS:SDL2_mixer::SDL2_mixer>,SDL2_mixer::SDL2_mixer,SDL2_mixer::SDL2_mixer-static>)
+
+
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
+target_link_libraries(player PRIVATE unofficial::sqlite3::sqlite3)
+
+find_package(SqliteOrm CONFIG REQUIRED)
+target_link_libraries(player PRIVATE sqlite_orm::sqlite_orm)
+
+find_package(httplib CONFIG REQUIRED)
+target_link_libraries(player PRIVATE httplib::httplib)
+
+
+find_package(LibtorrentRasterbar CONFIG REQUIRED)
+target_link_libraries(player PRIVATE LibtorrentRasterbar::torrent-rasterbar)
+
 
 set_target_properties(player PROPERTIES
     ${BUNDLE_ID_OPTION}
