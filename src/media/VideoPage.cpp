@@ -106,7 +106,7 @@ void VideoPage::ParseHtml(const std::string &htmlContent) {
 void VideoPage::PrintNode(htmlDocPtr doc, int level) {
     xmlNodePtr cur;
     // 遍历文档节点
-    for (cur = xmlget(doc)->children; cur != NULL; cur = cur->next) {
+    for (cur = xmlDocGetRootElement(doc)->children; cur != NULL; cur = cur->next) {
 
         if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *) "a") == 0) {
             xmlChar *link = xmlGetProp(cur, (const xmlChar *) "href");
