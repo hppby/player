@@ -165,6 +165,11 @@ target_link_libraries(player PRIVATE httplib::httplib)
 find_package(LibtorrentRasterbar CONFIG REQUIRED)
 target_link_libraries(player PRIVATE LibtorrentRasterbar::torrent-rasterbar)
 
+find_package(LibXml2 REQUIRED)
+target_link_libraries(player PRIVATE LibXml2::LibXml2)
+
+find_package(CURL REQUIRED)
+target_link_libraries(player PRIVATE CURL::libcurl)
 
 set_target_properties(player PROPERTIES
     ${BUNDLE_ID_OPTION}

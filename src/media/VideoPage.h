@@ -7,6 +7,7 @@
 
 
 #include <QWidget>
+#include <libxml/tree.h>
 
 class VideoPage : public QWidget{
 Q_OBJECT
@@ -19,6 +20,13 @@ private:
     void initUI();
 
 
+//    size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *userp);
+
+    std::string DownloadPage(const std::string &url);
+
+    void ParseHtml(const std::string &htmlContent);
+
+    void PrintNode(_xmlDoc *doc, int level);
 };
 
 
