@@ -3,7 +3,7 @@
 //
 
 #include "VideoPage.h"
-#include "../db/SqlVideo.h"
+
 #include "../network/HttpClient.h"
 #include "../download/HandleMagnet.h"
 
@@ -12,10 +12,16 @@
 #include <string>
 #include <curl/curl.h> // 引入 libcurl 库
 #include <libxml/HTMLparser.h> // 引入 libxml2 库
+#include <pugiconfig.hpp>
+#include <pugixml.hpp>
+
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
 
 VideoPage::VideoPage(QWidget *parent) {
 
-    SqlVideo *sqlVideo = new SqlVideo(this);
+    sql_video = new SqlVideo(this);
 //    HttpClient("https://baidu.com").debug(true).success([](const QString &response) {
 //        qDebug() << "===response===" << response;
 //    }).fail([](const QString &error, int errorCode) {
@@ -23,11 +29,11 @@ VideoPage::VideoPage(QWidget *parent) {
 //        qDebug().noquote() << error << errorCode;
 //    }).get();
 
-    std::string url = "https://cn.bing.com/search?q=%E7%94%B5%E5%BD%B1%E5%A4%A9%E5%A0%82&PC=U316&FORM=CHROMN";
-    std::string pageContent = DownloadPage(url);
-    ParseHtml(pageContent);
 
-    HandleMagnet *handleMagnet = new HandleMagnet(this);
+
+//    HandleMagnet *handleMagnet = new HandleMagnet(this);
+
+    getSearchPage(QString("https://www.dyttcn.com/"));
 }
 
 VideoPage::~VideoPage() {
@@ -35,11 +41,30 @@ VideoPage::~VideoPage() {
 }
 
 void VideoPage::initUI() {
-
     // 写一个爬虫工具
-
-
 }
+
+void VideoPage::getRootSearchPage() {
+    std::string url = "https://cn.bing.com/search?q=sql&PC=U316&FORM=CHROMN";
+    std::string pageContent = DownloadPage(url);
+    QList<QString> list =  parseRootSearchHtml(pageContent);
+
+
+//    for (int i = 0; i < list.size(); i++) {
+//
+//    }
+//QString path = list.at(0);
+
+    getSearchPage(QString("https://www.dyttcn.com/"));
+}
+
+void VideoPage::getSearchPage(QString url) {
+    std::string pageContent = DownloadPage(url.toStdString());
+    QList<SqlVideo::VideoInfo> list =  parseSearchHtml(pageContent, url);
+}
+
+
+
 
 
 // 定义一个回调函数，用于接收从服务器返回的数据
@@ -76,8 +101,9 @@ std::string VideoPage::DownloadPage(const std::string &url) {
 }
 
 
-// 解析 HTML 页面
-void VideoPage::ParseHtml(const std::string &htmlContent) {
+// 解析 搜索 HTML 页面
+QList<QString> VideoPage::parseRootSearchHtml(std::string htmlContent) {
+
     htmlDocPtr doc;
     xmlNodePtr cur;
 
@@ -86,43 +112,91 @@ void VideoPage::ParseHtml(const std::string &htmlContent) {
 
     if (doc == NULL) {
         std::cerr << "Failed to parse HTML document." << std::endl;
-        return;
+        return QList<QString>();
     }
 
+    // XPath 表达式，用于查找 h2 标签内部的 a 标签 以及a 标签里面的文本
+    const char* xpathExpr = "//h2/a";
+    xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
+    xmlXPathObjectPtr xpathResult = xmlXPathEvalExpression((xmlChar*)xpathExpr, xpathCtx);
 
+    QList<QString> myList;
 
-    // 遍历文档节点
-    for (cur = xmlDocGetRootElement(doc)->children; cur != NULL; cur = cur->next) {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *) "body") == 0) {
-            PrintNode(cur->doc, 1);
+    if (xpathResult != nullptr && xpathResult->type == XPATH_NODESET) {
+        xmlNodeSetPtr nodeSet = xpathResult->nodesetval;
+        for (int i = 0; i < nodeSet->nodeNr; ++i) {
+            xmlNodePtr node = nodeSet->nodeTab[i];
+            const char* href = (const char*)xmlGetProp(node, (const xmlChar*)"href");
+            const char* text = (const char*)xmlNodeGetContent(node);
 
+            std::cout << "H2 -> A: Href: " << href << ", Text: " << text << std::endl;
+            myList.append(QString(href));
+            xmlFree((void*)href); // 释放内存
+            xmlFree((void*)text); // 释放内存
         }
+    } else {
+        std::cerr << "Failed to evaluate XPath expression." << std::endl;
     }
 
+    qDebug() << "===myList===" << myList;
+
+    // 清理资源
+    xmlXPathFreeObject(xpathResult);
+    xmlXPathFreeContext(xpathCtx);
     xmlFreeDoc(doc);
-    xmlCleanupParser();
+
+    return myList;
 }
 
-void VideoPage::PrintNode(htmlDocPtr doc, int level) {
+// 解析 结果 HTML 页面
+QList<SqlVideo::VideoInfo> VideoPage::parseSearchHtml(std::string htmlContent, QString domainName)  {
+
+    htmlDocPtr doc;
     xmlNodePtr cur;
-    // 遍历文档节点
-    for (cur = xmlDocGetRootElement(doc)->children; cur != NULL; cur = cur->next) {
 
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *) "a") == 0) {
-            xmlChar *link = xmlGetProp(cur, (const xmlChar *) "href");
-            if (link) {
-                std::cout << "Found link: " << (char *) link << std::endl;
-                xmlFree(link);
-            }
-        } else if (xmlStrcmp(cur->name, (const xmlChar *) "div") == 0
-                   || xmlStrcmp(cur->name, (const xmlChar *) "main") == 0
-                   || xmlStrcmp(cur->name, (const xmlChar *) "ol") == 0
-                   || xmlStrcmp(cur->name, (const xmlChar *) "li") == 0
-                   || xmlStrcmp(cur->name, (const xmlChar *) "h2") == 0
-                ) {
-            PrintNode(cur->doc, level);
-        }
+    doc = htmlReadDoc((xmlChar *) htmlContent.c_str(), NULL, NULL,
+                      HTML_PARSE_RECOVER | HTML_PARSE_NOERROR | HTML_PARSE_NOWARNING);
 
+    if (doc == NULL) {
+        std::cerr << "Failed to parse HTML document." << std::endl;
+        return QList<SqlVideo::VideoInfo>();
     }
+
+    // XPath 表达式，用于查找 h2 标签内部的 a 标签 以及a 标签里面的文本
+    const char* xpathExpr = "//ul/li/a";
+    xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
+    xmlXPathObjectPtr xpathResult = xmlXPathEvalExpression((xmlChar*)xpathExpr, xpathCtx);
+
+    QList<SqlVideo::VideoInfo> myList;
+
+    if (xpathResult != nullptr && xpathResult->type == XPATH_NODESET) {
+        xmlNodeSetPtr nodeSet = xpathResult->nodesetval;
+        for (int i = 0; i < nodeSet->nodeNr; ++i) {
+            xmlNodePtr node = nodeSet->nodeTab[i];
+            const char* href = (const char*)xmlGetProp(node, (const xmlChar*)"href");
+            const char* title = (const char*)xmlGetProp(node, (const xmlChar*)"title");
+
+            if (href && title) {
+                myList.append(SqlVideo::VideoInfo{
+                        .title=std::string(title),
+                        .path= domainName.toStdString() + std::string(href)
+                });
+            }
+
+            xmlFree((void*)href); // 释放内存
+            xmlFree((void*)title); // 释放内存
+        }
+    } else {
+        std::cerr << "Failed to evaluate XPath expression." << std::endl;
+    }
+
+//    qDebug() << "===myList===" << myL;
+
+    // 清理资源
+    xmlXPathFreeObject(xpathResult);
+    xmlXPathFreeContext(xpathCtx);
+    xmlFreeDoc(doc);
+
+    return myList;
 }
 

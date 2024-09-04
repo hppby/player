@@ -56,8 +56,6 @@ set(PROJECT_SOURCES
         src/media/VideoPage.h
         src/db/SqlVideo.cpp
         src/db/SqlVideo.h
-        src/db/Movie.cpp
-        src/db/Movie.h
         src/network/HttpClient.cpp
         src/network/HttpClient.h
         src/download/HandleMagnet.cpp
@@ -170,6 +168,9 @@ target_link_libraries(player PRIVATE LibXml2::LibXml2)
 
 find_package(CURL REQUIRED)
 target_link_libraries(player PRIVATE CURL::libcurl)
+
+find_package(pugixml CONFIG REQUIRED)
+target_link_libraries(player PRIVATE pugixml::static pugixml::pugixml)
 
 set_target_properties(player PROPERTIES
     ${BUNDLE_ID_OPTION}

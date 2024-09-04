@@ -7,6 +7,9 @@
 
 
 #include <QObject>
+#include <sqlite_orm/sqlite_orm.h>
+
+using namespace sqlite_orm;
 
 class SqlVideo : public QObject {
 QOBJECT_H
@@ -16,7 +19,21 @@ public:
 
     ~SqlVideo();
 
+    struct VideoInfo{
+        int id;
+        std::string title;
+        std::string path;
+    };
 
+    void addVideo(VideoInfo videoInfo);
+
+
+private:
+    auto getStorage();
+
+//    decltype(internal::storage_base) storage;
+
+//    internal::storage_base storage;
 };
 
 

@@ -8,6 +8,7 @@
 
 #include <QWidget>
 #include <libxml/tree.h>
+#include "../db/SqlVideo.h"
 
 class VideoPage : public QWidget{
 Q_OBJECT
@@ -16,17 +17,26 @@ public:
     explicit VideoPage(QWidget *parent = nullptr);
     ~VideoPage() override;
 
+
+
 private:
     void initUI();
 
-
+    SqlVideo *sql_video;
 //    size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *userp);
 
     std::string DownloadPage(const std::string &url);
 
-    void ParseHtml(const std::string &htmlContent);
 
-    void PrintNode(_xmlDoc *doc, int level);
+
+    void PrintNode(xmlNodePtr node, int level);
+
+    void getRootSearchPage();
+
+    void getSearchPage(QString url);
+
+    QList<QString> parseRootSearchHtml(std::string htmlContent);
+    QList<SqlVideo::VideoInfo> parseSearchHtml(std::string htmlContent,  QString domainName);
 };
 
 
