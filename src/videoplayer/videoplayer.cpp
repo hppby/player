@@ -27,28 +27,21 @@
 
 Videoplayer::Videoplayer(QWidget *parent) {
 
-    this->setGeometry(100, 100, 1024, 600);
+    this->setFixedSize(600,400);
     this->setAttribute(Qt::WA_DeleteOnClose, true);
     this->setMouseTracking(true);
     isProgressMoving = false;
     m_isControlShowing = true;
     is_playing = true;
     m_controlHeight = 80;
-    m_timer = new QTimer(this);
 
-
-    // 初始化播放器
     InitPlayer();
-
     InitControl();
 
-    connect(m_timer, &QTimer::timeout, this, [=]() {
-        qDebug() << "timeout=====";
-//        headerContent->setFixedHeight(0);
-//        controlBox->setFixedHeight(0);
-        m_isControlShowing = false;
-        m_timer->stop();
-    });
+QStackedLayout *layout = new QStackedLayout(this);
+layout->addWidget(m_playView);
+layout->addWidget(controlBox);
+
 
 }
 
@@ -289,6 +282,19 @@ void Videoplayer::ButtonStyleSet(QPushButton *button, QString IconPath) {
 }
 
 void Videoplayer::openFile(QString filename) {
+    m_filename = filename;
+
+    m_timer = new QTimer(this);
+    // 初始化播放器
+    InitPlayer();
+
+    InitControl();
+
+    connect(m_timer, &QTimer::timeout, this, [=]() {
+        m_isControlShowing = false;
+        m_timer->stop();
+    });
+
     setWindowTitle(filename);
     bool isOpen = video_decoder->openFile(filename);
 
@@ -305,13 +311,17 @@ void Videoplayer::resizeEvent(QResizeEvent *event)
     // 在这里添加你的代码，比如重新布局内部控件
     qDebug() << "窗口大小已更改: " << event->size();
 
-    this->video_decoder->videoSize = this->size();
+//    this->video_decoder->videoSize = event->size();
 
+if (this->m_filename != nullptr) {
     this->m_playView->resize(event->size().width(), event->size().height());
 
-    this->controlBox->setGeometry(0, this->height() - m_controlHeight, this->width(), m_controlHeight);
-
+    this->controlBox->setGeometry(0, event->size().height() - m_controlHeight, event->size().width(), m_controlHeight);
     this->progresssValueChanged();
+}
+
+
+
 }
 
 

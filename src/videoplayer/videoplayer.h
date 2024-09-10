@@ -55,8 +55,9 @@ public:
 
 
     ~Videoplayer() override;
-
 private:
+    QString m_filename;
+
 
 
     VideoDecoder *video_decoder;

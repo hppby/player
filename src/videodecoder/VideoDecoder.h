@@ -53,7 +53,6 @@ public:
     void onStop();
     bool onPlayAndPause(bool pause);
 
-    QSize videoSize;
 
     bool isChangedWindowSize;
 

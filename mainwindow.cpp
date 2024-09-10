@@ -57,17 +57,8 @@ void MainWindow::initView() {
     QVBoxLayout *menuLayout = new QVBoxLayout(menuView);
 
     Button *btn1 = new Button("本地", this);
-    connect(btn1, &Button::clicked, this, [=]{
-        if (!videoPage->isActiveWindow()) {
-            contentLayout->setCurrentIndex(0);
-        }
-    });
     Button *btn2 = new Button("在线", this);
-    connect(btn2, &Button::clicked, this, [=]{
-        if (!videoPage->isActiveWindow()) {
-            contentLayout->setCurrentWidget(videoPage);
-        }
-    });
+
 
     menuLayout->addWidget(btn1);
     menuLayout->addWidget(btn2);
@@ -77,18 +68,15 @@ void MainWindow::initView() {
 
     // 创建右侧的主页面
     QWidget *contentWidget = new QWidget(this);
-    contentWidget->setStyleSheet("background-color: #f000ff;");
+    contentWidget->setMinimumWidth(400); // 设置最小宽度
 
     QStackedLayout *contentLayout = new QStackedLayout(contentWidget);
-    contentLayout->addWidget(new QLabel("Main Content", this));
-
-        videoPage = new VideoPage(this);
+    videoplayer = new Videoplayer(contentWidget);
+    contentLayout->addWidget(videoplayer);
+    videoPage = new VideoPage(contentWidget);
     contentLayout->addWidget(videoPage);
 
 
-
-    contentWidget->setLayout(contentLayout);
-    contentWidget->setMinimumWidth(400); // 设置最小宽度
 
     // 创建主布局
     QHBoxLayout *mainLayout = new QHBoxLayout(this);
@@ -97,9 +85,19 @@ void MainWindow::initView() {
 
     // 设置 mainLayout 为主布局
     QWidget *centralWidget = new QWidget(this);
-//    centralWidget->setStyleSheet("background-color: #ff00ff;");
     centralWidget->setLayout(mainLayout);
     setCentralWidget(centralWidget);
+
+    connect(btn1, &Button::clicked, this, [=]{
+        if (contentLayout->currentIndex() != 0) {
+            contentLayout->setCurrentIndex(0);
+        }
+    });
+    connect(btn2, &Button::clicked, this, [=]{
+        if (contentLayout->currentIndex() != 1) {
+        contentLayout->setCurrentIndex(1);
+        }
+    });
 
     // 调整初始大小
     resize(this->width(), this->height());
