@@ -19,6 +19,14 @@
 #include <libxml/tree.h>
 #include <libxml/xpath.h>
 
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QPushButton>
+#include <QTableWidget>
+
+using namespace DataModel;
+
 VideoPage::VideoPage(QWidget *parent) {
 
     sql_video = new SqlVideo(this);
@@ -33,7 +41,10 @@ VideoPage::VideoPage(QWidget *parent) {
 
 //    HandleMagnet *handleMagnet = new HandleMagnet(this);
 
-    getSearchPage(QString("https://www.dyttcn.com/"));
+
+//    getSearchPage(QString("https://www.dyttcn.com/"));
+
+    initUI();
 }
 
 VideoPage::~VideoPage() {
@@ -41,7 +52,55 @@ VideoPage::~VideoPage() {
 }
 
 void VideoPage::initUI() {
+
+    this->setFixedSize(600,400);
     // 写一个爬虫工具
+    // 创建UI组件
+    QLineEdit *name_line_edit = new QLineEdit();
+    // 设置高 55 宽 200
+    name_line_edit->setFixedHeight(33);
+    name_line_edit->setFixedWidth(200);
+
+    QHBoxLayout *h_layout_name = new QHBoxLayout();
+
+    h_layout_name->addStretch(1);
+    h_layout_name->addWidget(name_line_edit);
+    h_layout_name->setAlignment(name_line_edit, Qt::AlignCenter);
+h_layout_name->addStretch(1);
+
+    QTableWidget *m_table=new QTableWidget();//创建表格
+    QHBoxLayout *h_layout_table = new QHBoxLayout();
+    h_layout_table->addWidget(m_table);
+
+    QVBoxLayout *v_layout = new QVBoxLayout(this);
+    v_layout->addLayout(h_layout_name);
+    v_layout->addLayout(h_layout_table);
+
+
+    m_table->setRowCount(10);//设置行数
+    QStringList column_name = {"名称","类型","年份","地址", "操作"};
+    m_table->setColumnCount(column_name.length());//设置列数
+    m_table->setHorizontalHeaderLabels(column_name);//一次添加很多
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+
+    QList<VideoInfo> list = sql_video->getVideos(VideoInfo{
+        .title=std::string(""),
+        .path=std::string("h")
+},1);
+
+    for (int i = 0; i < list.size(); i++) {
+        DataModel::VideoInfo videoInfo = list.at(i);
+
+        m_table->setItem(i,0,new QTableWidgetItem(QString::fromStdString(videoInfo.title)));
+        m_table->setItem(i,1,new QTableWidgetItem(QString::fromStdString(videoInfo.type)));
+        m_table->setItem(i,2,new QTableWidgetItem(QString::fromStdString(videoInfo.year)));
+        m_table->setItem(i,3,new QTableWidgetItem(QString::fromStdString(videoInfo.path)));
+
+        QPushButton *btn = new QPushButton();
+        btn->setText("查看");
+        m_table->setCellWidget(i,column_name.length()-1,btn);
+    }
 }
 
 void VideoPage::getRootSearchPage() {
@@ -60,7 +119,18 @@ void VideoPage::getRootSearchPage() {
 
 void VideoPage::getSearchPage(QString url) {
     std::string pageContent = DownloadPage(url.toStdString());
-    QList<SqlVideo::VideoInfo> list =  parseSearchHtml(pageContent, url);
+    QList<DataModel::VideoInfo> list =  parseSearchHtml(pageContent, url);
+
+    for (int i = 0; i < list.size(); i++) {
+        DataModel::VideoInfo videoInfo = list.at(i);
+//        qDebug() << "===videoInfo===" << videoInfo.title << videoInfo.path;
+        sql_video->addVideo(videoInfo);
+//        sql_video->update(videoInfo);
+//        sql_video->deleteById(videoInfo.id);
+//        sql_video->selectAll();
+//        sql_video->selectById(videoInfo.id);
+//        sql_video->selectByTitle(videoInfo.title);
+    }
 }
 
 
@@ -149,7 +219,9 @@ QList<QString> VideoPage::parseRootSearchHtml(std::string htmlContent) {
 }
 
 // 解析 结果 HTML 页面
-QList<SqlVideo::VideoInfo> VideoPage::parseSearchHtml(std::string htmlContent, QString domainName)  {
+QList<DataModel::VideoInfo> VideoPage::parseSearchHtml(std::string htmlContent, QString domainName)  {
+
+
 
     htmlDocPtr doc;
     xmlNodePtr cur;
@@ -159,7 +231,7 @@ QList<SqlVideo::VideoInfo> VideoPage::parseSearchHtml(std::string htmlContent, Q
 
     if (doc == NULL) {
         std::cerr << "Failed to parse HTML document." << std::endl;
-        return QList<SqlVideo::VideoInfo>();
+        return QList<DataModel::VideoInfo>();
     }
 
     // XPath 表达式，用于查找 h2 标签内部的 a 标签 以及a 标签里面的文本
@@ -167,24 +239,42 @@ QList<SqlVideo::VideoInfo> VideoPage::parseSearchHtml(std::string htmlContent, Q
     xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
     xmlXPathObjectPtr xpathResult = xmlXPathEvalExpression((xmlChar*)xpathExpr, xpathCtx);
 
-    QList<SqlVideo::VideoInfo> myList;
+    QList<DataModel::VideoInfo> myList;
 
     if (xpathResult != nullptr && xpathResult->type == XPATH_NODESET) {
         xmlNodeSetPtr nodeSet = xpathResult->nodesetval;
         for (int i = 0; i < nodeSet->nodeNr; ++i) {
             xmlNodePtr node = nodeSet->nodeTab[i];
             const char* href = (const char*)xmlGetProp(node, (const xmlChar*)"href");
-            const char* title = (const char*)xmlGetProp(node, (const xmlChar*)"title");
+            const char* tmp_title = (const char*)xmlGetProp(node, (const xmlChar*)"title");
 
-            if (href && title) {
-                myList.append(SqlVideo::VideoInfo{
+            if (href && tmp_title) {
+
+                std::string full_title = std::string(tmp_title);
+
+                // 查找各个子串的位置
+                std::size_t start = 0;
+                std::size_t end_year = full_title.find("年");
+                std::size_t start_type = end_year + 3;
+                std::size_t end_type = full_title.find("《");
+                std::size_t start_title = end_type + 3;
+                std::size_t end_title = full_title.find("》");
+
+// 提取子串
+                std::string year = full_title.substr(start, end_year - start);
+                std::string type = full_title.substr(start_type, end_type - start_type);
+                std::string title = full_title.substr(start_title, end_title - start_title);
+
+                myList.append(DataModel::VideoInfo{
                         .title=std::string(title),
-                        .path= domainName.toStdString() + std::string(href)
+                        .path= domainName.toStdString() + std::string(href),
+                        .type=std::string(type),
+                        .year=std::string(year),
                 });
             }
 
             xmlFree((void*)href); // 释放内存
-            xmlFree((void*)title); // 释放内存
+            xmlFree((void*)tmp_title); // 释放内存
         }
     } else {
         std::cerr << "Failed to evaluate XPath expression." << std::endl;

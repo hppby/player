@@ -25,7 +25,7 @@
 #include "videoplayer.h"
 
 
-Videoplayer::Videoplayer(QWidget *parent) : QWidget(parent), m_voice(50) {
+Videoplayer::Videoplayer(QWidget *parent) {
 
     this->setGeometry(100, 100, 1024, 600);
     this->setAttribute(Qt::WA_DeleteOnClose, true);

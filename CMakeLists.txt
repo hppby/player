@@ -60,6 +60,8 @@ set(PROJECT_SOURCES
         src/network/HttpClient.h
         src/download/HandleMagnet.cpp
         src/download/HandleMagnet.h
+        src/components/Button.cpp
+        src/components/Button.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)

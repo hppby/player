@@ -11,6 +11,20 @@
 
 using namespace sqlite_orm;
 
+
+namespace DataModel {
+
+    struct VideoInfo{
+        int id;
+        std::string title;
+        std::string path;
+        std::string type;
+        std::string year;
+
+    };
+}
+using namespace DataModel;
+
 class SqlVideo : public QObject {
 QOBJECT_H
 
@@ -19,21 +33,13 @@ public:
 
     ~SqlVideo();
 
-    struct VideoInfo{
-        int id;
-        std::string title;
-        std::string path;
-    };
 
     void addVideo(VideoInfo videoInfo);
+    QList<VideoInfo> getVideos(VideoInfo query, int pageNum);
 
 
 private:
-    auto getStorage();
 
-//    decltype(internal::storage_base) storage;
-
-//    internal::storage_base storage;
 };
 
 

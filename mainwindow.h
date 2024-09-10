@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include "src/videoplayer/videoplayer.h"
+#include "src/media/VideoPage.h"
 
 class MainWindow : public QMainWindow
 {
@@ -15,6 +16,13 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+    void initView();
+
+private:
+    VideoPage *videoPage;
+    QStackedLayout *contentLayout;
+
 };
 #endif // MAINWINDOW_H
 

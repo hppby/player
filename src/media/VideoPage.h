@@ -10,6 +10,9 @@
 #include <libxml/tree.h>
 #include "../db/SqlVideo.h"
 
+
+class QTableWidget;
+
 class VideoPage : public QWidget{
 Q_OBJECT
 
@@ -21,6 +24,7 @@ public:
 
 private:
     void initUI();
+    QTableWidget *m_table;
 
     SqlVideo *sql_video;
 //    size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *userp);
@@ -36,7 +40,7 @@ private:
     void getSearchPage(QString url);
 
     QList<QString> parseRootSearchHtml(std::string htmlContent);
-    QList<SqlVideo::VideoInfo> parseSearchHtml(std::string htmlContent,  QString domainName);
+    QList<DataModel::VideoInfo> parseSearchHtml(std::string htmlContent,  QString domainName);
 };
 
 
